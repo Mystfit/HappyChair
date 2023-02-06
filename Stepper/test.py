@@ -23,10 +23,10 @@ try:
 #     Motor1.TurnStep(Dir='backward', steps=200, stepdelay = 0.005)
 #     Motor1.Stop()
 
-    Motor2.SetMicroStep('softward','fullstep')
-    Motor2.TurnStep(Dir='forward', steps=240, stepdelay = 0.003)
+    Motor1.SetMicroStep('softward','fullstep')
+    Motor1.TurnStep(Dir='forward', steps=240, stepdelay = 0.003)
     time.sleep(0.5)
-    Motor2.TurnStep(Dir='backward', steps=240, stepdelay = 0.003)
+    Motor1.TurnStep(Dir='backward', steps=240, stepdelay = 0.003)
     #time.sleep(0.5)
     #Motor2.TurnStep(Dir='forward', steps=120, stepdelay = 0.003)
     '''
