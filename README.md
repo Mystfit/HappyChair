@@ -5,7 +5,7 @@ Train your own TensorFlow Lite object detection models and run them on the Raspb
    <img src="doc/BSR_demo.gif">
 </p>
 
-Get started with training on Google Colab by clicking the icon below.
+Get started with training on Google Colab by clicking the icon below, or [click here to go straight to the YouTube video that provides step-by-step instructions](https://youtu.be/XZ7FYAMCc4M).
 
 <a href="https://colab.research.google.com/github/EdjeElectronics/TensorFlow-Lite-Object-Detection-on-Android-and-Raspberry-Pi/blob/master/Train_TFLite2_Object_Detction_Model.ipynb" target="_parent"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"/></a>
 
@@ -83,13 +83,13 @@ After a few moments of initializing, a window will appear showing the webcam fee
 To run the video detection script, issue:
 
 ```
-python TFLite_detection_image.py --modeldir=TFLite_model
+python TFLite_detection_video.py --modeldir=TFLite_model
 ```
 
 A window will appear showing consecutive frames from the video, with each object in the frame labeled. Press 'q' to close the window and end the script. By default, the video detection script will open a video named 'test.mp4'. To open a specific video file, use the `--video` option:
 
 ```
-python TFLite_detection_image.py --modeldir=TFLite_model --video='birdy.mp4'
+python TFLite_detection_video.py --modeldir=TFLite_model --video='birdy.mp4'
 ```
 
 Note: Video detection will run at a slower FPS than realtime webcam detection. This is mainly because loading a frame from a video file requires more processor I/O than receiving a frame from a webcam.
