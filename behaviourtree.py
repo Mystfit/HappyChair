@@ -27,6 +27,13 @@ class BehaviourNode(object):
 		for node, condition in self.edges.items():
 			if condition() and not node.is_transitioning:
 				self.tree.transition_to_active_node(node, self.transition_duration)
+				self.on_transition_start()
+
+	def on_transition_start(self):
+		pass
+
+	def on_transition_end(self):
+		pass
 
 
 class BehaviourTree(object):
@@ -47,6 +54,7 @@ class BehaviourTree(object):
 			if self.transition_start_time + elapsed >= self.transition_end_time:
 				self.active_node.is_transitioning = False
 				self.active_node = self.transitioning_node
+				self.active_node.on_transition_end()
 				self.transitioning_node = None
 
 		if self.active_node:
