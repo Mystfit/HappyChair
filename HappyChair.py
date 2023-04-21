@@ -240,9 +240,11 @@ min_conf_threshold = float(args.threshold)
 resW, resH = args.resolution.split('x')
 imW, imH = int(resW), int(resH)
 flip_webcam = hasattr(args, "flip")
-stepper_enabled = not hasattr(args, "disablespin")
+stepper_enabled = not args.disablespin
 use_TPU = args.edgetpu
 rotate_deadzone = int(args.deadzone)
+
+print(f"Stepper enabled? {stepper_enabled}")
 
 # Import TensorFlow libraries
 # If tflite_runtime is installed, import interpreter from tflite_runtime, else import from regular tensorflow
@@ -373,13 +375,14 @@ while True:
             cv2.rectangle(shapes, (screen_center[0] + int((rotate_deadzone * 0.5)), 0), (imW, imH), (0, 255, 255), cv2.FILLED)
             stepper.rotate(-1, 200, 0.003)
             time.sleep(1)
+            stepper.stop()
 
         elif person_center_dist > rotate_deadzone:
             # Rotate right
             cv2.rectangle(shapes, (0, 0), (screen_center[0] - int((rotate_deadzone * 0.5)), imH), (0, 255, 255), cv2.FILLED)
             stepper.rotate(1, 200, 0.003)
             time.sleep(1)
-
+            stepper.stop()
         else:
             # Do nothing
             stepper.stop()

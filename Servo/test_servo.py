@@ -42,15 +42,23 @@ shoulder_r.actuation_range = 180
 elbow_r.actuation_range = 180
 hand_r.actuation_range = 180
 
-for i in range (10):
-    for i in range (100):
-        rotate_servo(shoulder_r, 120-i)
-        rotate_servo(hand_r, 120-i)
-        time.sleep(0.05)
-    for i in range (100):
-        rotate_servo(shoulder_r, 20+i)
-        rotate_servo(hand_r, 20+i)
-        time.sleep(0.05)
+rotate_servo(shoulder_r, 90)
+rotate_servo(elbow_r, 90)
+rotate_servo(hand_r, 90)
+
+rotate_servo(shoulder_l, 90)
+rotate_servo(elbow_l, 90)
+rotate_servo(hand_l, 90)
+
+#for i in range (10):
+#    for i in range (100):
+#        rotate_servo(shoulder_r, 120-i)
+#        rotate_servo(hand_r, 120-i)
+#        time.sleep(0.05)
+#    for i in range (100):
+#        rotate_servo(shoulder_r, 20+i)
+#        rotate_servo(hand_r, 20+i)
+#        time.sleep(0.05)
 
 
 
