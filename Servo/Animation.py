@@ -23,6 +23,7 @@ class AnimationPlayer(object):
         self._is_playing = False
         #self.looping = False
         self.servos = {}
+        self.steppers = {}
         
     def add_layer(self, layer):
         self.stack.append(layer)
@@ -179,10 +180,13 @@ if __name__ == "__main__":
     player.add_servo(10, "elbow.L", None,  (500, 2500))
     player.add_servo(12, "hand.L", None,  (500, 2500))
     
-    anim1 = Animation(Path( __file__ ).absolute().parent / ".." / "Animations" / "ServoArm_LeftWave.json")
-    anim2 = Animation(Path( __file__ ).absolute().parent / ".." / "Animations" / "ServoArm_RightBeckon.json")
+    #anim1 = Animation(Path( __file__ ).absolute().parent / ".." / "Animations" / "ServoArm_LeftWave.json")
+    #anim2 = Animation(Path( __file__ ).absolute().parent / ".." / "Animations" / "ServoArm_RightBeckon.json")
+    #anim_layer1 = AnimationLayer(anim1, True, 1.0)
+    #anim_layer2 = AnimationLayer(anim2, True, 0.0)
+    #player.add_layer(anim_layer1)
+    #player.add_layer(anim_layer2)
+    anim1 = Animation(Path( __file__ ).absolute().parent / ".." / "Animations" / "demoloop.json")
     anim_layer1 = AnimationLayer(anim1, True, 1.0)
-    anim_layer2 = AnimationLayer(anim2, True, 0.0)
     player.add_layer(anim_layer1)
-    player.add_layer(anim_layer2)
     player.play()
