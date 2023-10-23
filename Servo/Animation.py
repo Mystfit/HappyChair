@@ -1,5 +1,6 @@
 import json
 from adafruit_servokit import ServoKit
+from DRV8825 import DRV8825
 import math, time
 import numpy as np
 from threading import Thread
@@ -104,13 +105,14 @@ class AnimationPlayer(object):
 
 
 class AnimationLayer(object):
-    def __init__(self, animation, loop = False, weight = 1.0):
+    def __init__(self, animation, loop = False, weight = 1.0, on_completed_fn = lambda: None):
         self.looping = loop
         self.current_animation = animation
         self.bone_direction_remap = {}
         self.current_frame = 0
         self.weight = weight
         self._is_playing = True
+        self.on_complete = on_completed_fn
         
     def start(self):
        pass
@@ -148,6 +150,7 @@ class AnimationLayer(object):
         if self.current_animation:
             if self.current_frame == self.current_animation.frames():
                 self.current_frame = 0
+                self.on_complete()
                 if not self.looping:
                     self.stop()  
         
@@ -180,6 +183,31 @@ if __name__ == "__main__":
     player.add_servo(10, "elbow.L", None,  (500, 2500))
     player.add_servo(12, "hand.L", None,  (500, 2500))
     
+    Motor1 = DRV8825(dir_pin=24, step_pin=18, enable_pin=4, mode_pins=(21, 22, 27))
+    Motor1.SetMicroStep('softward','fullstep')
+    Motor1.Stop()
+    def stepper_wiggle():
+        sleepdelay = 0.52
+        steps = 175
+        stepdelay = 0.0035
+        Motor1.TurnStep(Dir='forward', steps=steps, stepdelay=stepdelay)
+        time.sleep(sleepdelay)
+        Motor1.TurnStep(Dir='backward', steps=steps, stepdelay=stepdelay)
+        time.sleep(sleepdelay)
+        Motor1.TurnStep(Dir='forward', steps=steps, stepdelay=stepdelay)
+        time.sleep(sleepdelay)
+        Motor1.TurnStep(Dir='backward', steps=steps, stepdelay=stepdelay)
+        time.sleep(sleepdelay)
+        Motor1.TurnStep(Dir='forward', steps=steps, stepdelay=stepdelay)
+        time.sleep(sleepdelay)
+        Motor1.TurnStep(Dir='backward', steps=steps, stepdelay=stepdelay)
+        time.sleep(sleepdelay)
+        Motor1.TurnStep(Dir='forward', steps=steps, stepdelay=stepdelay)
+        time.sleep(sleepdelay)
+        Motor1.TurnStep(Dir='backward', steps=steps, stepdelay=stepdelay)
+        Motor1.Stop()
+        
+    
     #anim1 = Animation(Path( __file__ ).absolute().parent / ".." / "Animations" / "ServoArm_LeftWave.json")
     #anim2 = Animation(Path( __file__ ).absolute().parent / ".." / "Animations" / "ServoArm_RightBeckon.json")
     #anim_layer1 = AnimationLayer(anim1, True, 1.0)
@@ -187,6 +215,6 @@ if __name__ == "__main__":
     #player.add_layer(anim_layer1)
     #player.add_layer(anim_layer2)
     anim1 = Animation(Path( __file__ ).absolute().parent / ".." / "Animations" / "demoloop.json")
-    anim_layer1 = AnimationLayer(anim1, True, 1.0)
+    anim_layer1 = AnimationLayer(anim1, True, 1.0)#, stepper_wiggle)
     player.add_layer(anim_layer1)
     player.play()
