@@ -1,9 +1,9 @@
 import json
 from adafruit_servokit import ServoKit
-from DRV8825 import DRV8825
+from Servo.DRV8825 import DRV8825
 import math, time
 import numpy as np
-from threading import Thread
+from threading import Thread, Lock
 from pathlib import Path
 
 
@@ -25,6 +25,7 @@ class AnimationPlayer(object):
         #self.looping = False
         self.servos = {}
         self.steppers = {}
+        self.anim_lock = Lock()
         
     def add_layer(self, layer):
         self.stack.append(layer)
@@ -33,23 +34,36 @@ class AnimationPlayer(object):
         self.stack.remove(layer)
         
     def set_layer_weight(self, layer, weight):
-        layer.weight = weight
         anim_idx = self.stack.index(layer)
+        
         weights = np.array([anim.weight for anim in self.stack])
         
         # Calculate the sum of the weights without the modified item
         sum_without_modified_item = np.sum(weights) - weight
         
+        weights[anim_idx] = weight
+        
         # Calculate the scaling factor required to adjust the sum to 1.0
-        scaling_factor = 1.0 / sum_without_modified_item
+        #scaling_factor = 1.0 / sum_without_modified_item#(sum_without_modified_item + weight)
         
         # Apply the scaling factor to the remaining items in the array
-        weights = (weights - weight) * scaling_factor
-        weights[anim_idx] = weight
-                
-        for anim, norm_weight in zip(self.stack, weights):
-            print(f"Setting weight of layer {anim} to {norm_weight}")
-            anim.weight = norm_weight
+        print(f"Weights prenormalization: {weights}")
+        if sum_without_modified_item == 0:
+            for i in range(len(weights)):
+                if i != anim_idx:
+                    weights[i] =0.0
+        else:        
+            for i in range(len(weights)):
+                if i != anim_idx:
+                    weights[i] /= sum_without_modified_item
+
+        
+        # Aquire anim lock so we don't end up with broken weights whilst the anim thread reads from the layer stack
+        with self.anim_lock:
+            # Set normalized weights
+            for anim, norm_weight in zip(self.stack, weights):
+                print(f"Setting weight of layer {anim} to {norm_weight}")
+                anim.weight = norm_weight
         
     def update(self):
         while True:
@@ -59,18 +73,23 @@ class AnimationPlayer(object):
                 continue
             
             if self._is_playing:
-                weighted_layer_sum = np.zeros(len(self.servos)) 
+                weighted_layer_sum = np.zeros(len(self.servos))
+                
+                # Update all animation counters
                 for anim in self.stack:
                     anim.update()
-                    
-                    # Read and sum angles together
-                    anim_angles = np.zeros(len(self.servos))
-                    servo_idx = 0
-                    for servo_id, servo in self.servos.items():
-                        anim_angles[servo_idx] = anim.servo_angle(servo_id)
-                        servo_idx += 1
-                    weighted_layer_sum += anim_angles * anim.weight
-                                
+                
+                # Aquire animation lock to guarantee normalized weights
+                with self.anim_lock:
+                    for anim in self.stack:
+                        # Read and sum angles together
+                        anim_angles = np.zeros(len(self.servos))
+                        servo_idx = 0
+                        for servo_id, servo in self.servos.items():
+                            anim_angles[servo_idx] = anim.servo_angle(servo_id)
+                            servo_idx += 1
+                        weighted_layer_sum += anim_angles * anim.weight
+                
                 # Rotate servos
                 for servo_id, angle in zip(self.servos, weighted_layer_sum):
                     self.rotate_servo(servo_id, angle)           
@@ -214,7 +233,7 @@ if __name__ == "__main__":
     #anim_layer2 = AnimationLayer(anim2, True, 0.0)
     #player.add_layer(anim_layer1)
     #player.add_layer(anim_layer2)
-    anim1 = Animation(Path( __file__ ).absolute().parent / ".." / "Animations" / "demoloop.json")
+    anim1 = Animation(Path( __file__ ).absolute().parent / ".." / "Animations" / "wave_only.json")
     anim_layer1 = AnimationLayer(anim1, True, 1.0)#, stepper_wiggle)
     player.add_layer(anim_layer1)
     player.play()
