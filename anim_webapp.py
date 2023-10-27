@@ -10,17 +10,17 @@ current_layer = None
 animations = {
     'Excited': Animation(Path( __file__ ).absolute().parent /  "Animations" / "excited.json"),
     'Wave': Animation(Path( __file__ ).absolute().parent /  "Animations" / "wave_only.json"),
-    #'Beckon': Animation(Path( __file__ ).absolute().parent / "Animations" / "ServoArm_RightBeckon.json")
+    'Beckon': Animation(Path( __file__ ).absolute().parent / "Animations" / "ServoArm_RightBeckon.json")
     # Add more animations here
 }
 anim_layers = {}
 
+# Set initial weights and add layers
 for anim_name, animation in animations.items():
     layer = AnimationLayer(animation, True, 0.0 if len(anim_layers) else 1.0)
     anim_layers[anim_name] = layer
     player.add_layer(layer)
     
-#player.set_layer_weight(anim_layers["Wave"], 1.0)
 
     
 @app.route('/')
@@ -32,13 +32,11 @@ def play_animation():
     global current_layer, player
     animation_name = request.form['animation_name']
     animation_weight = request.form['weight']
+    interp_duration = request.form['interpolation_duration']
     
     if animation_name in animations:
         print("Starting animation")
-        #if current_layer:
-            #player.set_layer_weight(current_layer, 0.0)
-        player.set_layer_weight(anim_layers[animation_name], float(animation_weight))
-        #current_layer = anim_layers[animation_name]
+         player.animate_layer_weight(anim_layers[animation_name], float(animation_weight), float(interp_duration))
         return index()
 
 

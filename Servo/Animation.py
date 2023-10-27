@@ -1,10 +1,11 @@
 import json
 from adafruit_servokit import ServoKit
 from Servo.DRV8825 import DRV8825
-import math, time
+import math, time, os
 import numpy as np
 from threading import Thread, Lock
 from pathlib import Path
+from datetime import datetime, timedelta
 
 
 DEFAULT_SERVO_ANGLE = 90
@@ -16,16 +17,24 @@ def map_range(value, start1, stop1, start2, stop2):
 
 class AnimationPlayer(object):
     def __init__(self):
-        #self.base_layer = AnimationLayer
         self.stack = []
-        self.framerate = 12
-        self.kit = ServoKit(channels=16)
-        self.stopped = False
-        self._is_playing = False
-        #self.looping = False
         self.servos = {}
         self.steppers = {}
+        self.kit = ServoKit(channels=16)
         self.anim_lock = Lock()
+        
+        self.framerate = 12
+        self.stopped = False
+        self._is_playing = False
+        
+        # Interpolation
+        self._interpolating = False
+        self._interpolation_layer = None
+        self._interpolation_start_weight = 0.0
+        self._interpolation_end_weight = 1.0
+        self._interpolation_start_time = 0.0
+        self._interpolation_end_time = 0.0
+
         
     def add_layer(self, layer):
         self.stack.append(layer)
@@ -33,37 +42,47 @@ class AnimationPlayer(object):
     def remove_layer(self, layer):
         self.stack.remove(layer)
         
+    def animate_layer_weight(self, layer, weight, duration):
+        self._interpolating = True
+        self._interpolation_start_time = datetime.now()
+        self._interpolation_end_time = self._interpolation_start_time + timedelta(seconds=duration)
+        self._interpolation_start_weight = layer.weight
+        self._interpolation_end_weight = weight
+        self._interpolation_layer = layer
+        
     def set_layer_weight(self, layer, weight):
+        # Weights can only be in the range 0.0-1.0
+        weight = max(min(weight, 1.0), 0.0)
+        weights = np.array([anim.weight for anim in self.stack])
         anim_idx = self.stack.index(layer)
         
-        weights = np.array([anim.weight for anim in self.stack])
-        
         # Calculate the sum of the weights without the modified item
-        sum_without_modified_item = np.sum(weights) - weight
-        
+        sum_without_modified_item = np.sum(weights) - weights[anim_idx] + weight        
         weights[anim_idx] = weight
         
         # Calculate the scaling factor required to adjust the sum to 1.0
-        #scaling_factor = 1.0 / sum_without_modified_item#(sum_without_modified_item + weight)
-        
-        # Apply the scaling factor to the remaining items in the array
-        print(f"Weights prenormalization: {weights}")
-        if sum_without_modified_item == 0:
+        scaling_factor = 1.0 / (sum_without_modified_item + weight)#(sum_without_modified_item + weight)
+        if scaling_factor >= 0:
             for i in range(len(weights)):
                 if i != anim_idx:
-                    weights[i] =0.0
-        else:        
-            for i in range(len(weights)):
+                    weights[i] *= scaling_factor
+        else:
+            print("Scaling factor is negative")
+            weights[anim_idx] = 1.0
+            
+            # Recalculate the scaling factor and distribute proportionally
+            scaling_factor = 1.0 / (sum_without_modified_item - weights[anim_idx])
+            for i in range(len(arr)):
                 if i != anim_idx:
-                    weights[i] /= sum_without_modified_item
-
+                    weights[i] *= scaling_factor
         
         # Aquire anim lock so we don't end up with broken weights whilst the anim thread reads from the layer stack
         with self.anim_lock:
             # Set normalized weights
             for anim, norm_weight in zip(self.stack, weights):
-                print(f"Setting weight of layer {anim} to {norm_weight}")
-                anim.weight = norm_weight
+                clamped_weight = round(max(min(norm_weight, 1.0), 0.0),3)
+                print(f"Setting weight of layer {anim.current_animation.name} to {clamped_weight}")
+                anim.weight = clamped_weight
         
     def update(self):
         while True:
@@ -73,7 +92,21 @@ class AnimationPlayer(object):
                 continue
             
             if self._is_playing:
-                weighted_layer_sum = np.zeros(len(self.servos))
+                # Interpolate weights
+                if self._interpolating:
+                    current_time = datetime.now()
+                    if current_time >= self._interpolation_end_time:
+                        # Stop interpolating 
+                        self.set_layer_weight(self._interpolation_layer, self._interpolation_end_weight)
+                        self._interpolation_layer = None
+                        self._interpolating = False
+                    else:
+                        duration = self._interpolation_end_time - self._interpolation_start_time
+                        
+                        lerp_amt = float((current_time - self._interpolation_start_time) / duration)
+                        interpolated_weight = map_range(lerp_amt, 0.0, 1.0, self._interpolation_start_weight, self._interpolation_end_weight)
+                        self.set_layer_weight(self._interpolation_layer, interpolated_weight)
+                    
                 
                 # Update all animation counters
                 for anim in self.stack:
@@ -81,6 +114,7 @@ class AnimationPlayer(object):
                 
                 # Aquire animation lock to guarantee normalized weights
                 with self.anim_lock:
+                    weighted_layer_sum = np.zeros(len(self.servos))
                     for anim in self.stack:
                         # Read and sum angles together
                         anim_angles = np.zeros(len(self.servos))
@@ -120,7 +154,11 @@ class AnimationPlayer(object):
             self.servos[servo_id]["servo"].set_pulse_width_range(pulse_width[0], pulse_width[1])
             
     def rotate_servo(self, servo_id, value):
-        self.servos[servo_id]["servo"].angle = self.servos[servo_id]["remap"](value)
+        try:
+            angle = self.servos[servo_id]["remap"](value)
+            self.servos[servo_id]["servo"].angle = angle
+        except ValueError as e:
+            print(f"Angle {angle} out of range for servo {servo_id}. Ignoring")
 
 
 class AnimationLayer(object):
@@ -178,7 +216,8 @@ class AnimationLayer(object):
 
 
 class Animation(object):
-    def __init__(self, path):        
+    def __init__(self, path):
+        self.name = os.path.basename(path)
         f = open(path)
         self.data = json.load(f)
         f.close()
