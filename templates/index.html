@@ -1,11 +1,14 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Happy Chair Animation Controller</title>
-</head>
-<body>
+{% extends "bootstrap/base.html" %}
+{% block title %}This is an example page{% endblock %}
+
+{% block navbar %}
+<div class="navbar navbar-fixed-top">
+  <!-- ... -->
+</div>
+{% endblock %}
+{% block content %}
     <h1>Animation Controller</h1>
-    <form action="/play_animation" method="post">
+    <form action="/animation/play" method="post">
         <label for="weight">Animation weight:</label>
         <input id="weight" name="weight" type="number" step="any" min="0.0" max="1.0" value=1.0>
         <label for="weight">Interpolation duration (seconds):</label>
@@ -14,5 +17,19 @@
         <button type="submit" name="animation_name" value="{{ animation_name }}">{{ animation_name }}</button>
         {% endfor %}
     </form>
-</body>
-</html>
+    <form action="/animation/add" method="post" enctype=multipart/form-data>
+        <label for="file">Upload animation:</label>
+        <input type="file" id="file" name="file" accept=".json">
+        <input type="submit" value="Upload">
+    </form>
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% if messages %}
+    <div class="alert alert-{{ messages.0.0 }}" role="alert">
+      {% for category, message in messages %}
+        {{ message }} </br>
+      {% endfor %}
+    </div>
+  {% endif %}
+{% endwith %}
+
+{% endblock %}
