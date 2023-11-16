@@ -23,9 +23,10 @@ class AnimationPlayer(object):
         self.kit = ServoKit(channels=16)
         self.anim_lock = Lock()
         
-        self.framerate = 12
+        self.framerate = 60
         self.stopped = False
         self._is_playing = False
+        self._next_frame_time = datetime.now()
         
         # Interpolation
         self._interpolating = False
@@ -91,47 +92,52 @@ class AnimationPlayer(object):
                 time.sleep(0.1)
                 continue
             
+            current_frame_time = datetime.now()
+            
             if self._is_playing:
-                # Interpolate weights
-                if self._interpolating:
-                    current_time = datetime.now()
-                    if current_time >= self._interpolation_end_time:
-                        # Stop interpolating 
-                        self.set_layer_weight(self._interpolation_layer, self._interpolation_end_weight)
-                        self._interpolation_layer = None
-                        self._interpolating = False
-                    else:
-                        duration = self._interpolation_end_time - self._interpolation_start_time
-                        
-                        lerp_amt = float((current_time - self._interpolation_start_time) / duration)
-                        interpolated_weight = map_range(lerp_amt, 0.0, 1.0, self._interpolation_start_weight, self._interpolation_end_weight)
-                        self.set_layer_weight(self._interpolation_layer, interpolated_weight)
+                #print(f"Current frame time: {current_frame_time}, Next frame time: {self._next_frame_time}")
+                if current_frame_time >= self._next_frame_time:
+                    self._next_frame_time = current_frame_time + timedelta(seconds=(1.0 / self.framerate))
                     
-                
-                # Update all animation counters
-                for anim in self.stack:
-                    anim.update()
-                
-                # Aquire animation lock to guarantee normalized weights
-                with self.anim_lock:
-                    weighted_layer_sum = np.zeros(len(self.servos))
+                    # Interpolate weights
+                    if self._interpolating:
+                        current_time = datetime.now()
+                        if current_time >= self._interpolation_end_time:
+                            # Stop interpolating 
+                            self.set_layer_weight(self._interpolation_layer, self._interpolation_end_weight)
+                            self._interpolation_layer = None
+                            self._interpolating = False
+                        else:
+                            duration = self._interpolation_end_time - self._interpolation_start_time
+                            
+                            lerp_amt = float((current_time - self._interpolation_start_time) / duration)
+                            interpolated_weight = map_range(lerp_amt, 0.0, 1.0, self._interpolation_start_weight, self._interpolation_end_weight)
+                            self.set_layer_weight(self._interpolation_layer, interpolated_weight)
+                        
+                    
+                    # Update all animation counters
                     for anim in self.stack:
-                        # Read and sum angles together
-                        anim_angles = np.zeros(len(self.servos))
-                        servo_idx = 0
-                        for servo_id, servo in self.servos.items():
-                            anim_angles[servo_idx] = anim.servo_angle(servo_id)
-                            servo_idx += 1
-                        weighted_layer_sum += anim_angles * anim.weight
-                
-                # Rotate servos
-                for servo_id, angle in zip(self.servos, weighted_layer_sum):
-                    self.rotate_servo(servo_id, angle)           
-            
-            time.sleep(1 / self.framerate)
-            
+                        anim.update()
+                    
+                    # Aquire animation lock to guarantee normalized weights
+                    with self.anim_lock:
+                        weighted_layer_sum = np.zeros(len(self.servos))
+                        for anim in self.stack:
+                            # Read and sum angles together
+                            anim_angles = np.zeros(len(self.servos))
+                            servo_idx = 0
+                            for servo_id, servo in self.servos.items():
+                                anim_angles[servo_idx] = anim.servo_angle(servo_id)
+                                servo_idx += 1
+                            weighted_layer_sum += anim_angles * anim.weight
+                    
+                    # Rotate servos
+                    for servo_id, angle in zip(self.servos, weighted_layer_sum):
+                        self.rotate_servo(servo_id, angle)
+                        
             # Quit thread
             if self.stopped:
+                print("Stopping animation player thread")
                 break
     
     def start(self):
@@ -140,6 +146,7 @@ class AnimationPlayer(object):
     
     def stop(self):
         self._is_playing = False
+        self._next_frame_time = datetime.now()
         #self.looping = False
         
     def play(self):

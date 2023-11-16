@@ -61,7 +61,23 @@ for anim_path in get_animation_paths(Path( __file__ ).absolute().parent /  "Anim
     
 @app.route('/')
 def index():
-    return render_template('index.html', animation_names=anim_layers.keys())
+    return render_template('index.html', animation_names=anim_layers.keys(), global_framerate=player.framerate)
+
+@app.route('/transport', methods=['POST'])
+def set_transport():
+    global player
+    transport_status = request.form['transport']
+    if transport_status == "play":
+        flash('Transport playing', "info")
+        player.play()
+    elif transport_status == "pause":
+        flash('Transport paused', "light")
+        player.stop()
+    else:
+        print("No transport change")
+    print(request.form['global_framerate'])    
+    player.framerate = float(request.form['global_framerate'])
+    return redirect(url_for('index'))
 
 @app.route('/animation/play', methods=['POST'])
 def play_animation():
@@ -82,13 +98,13 @@ def add_animation():
         # check if the post request has the file part
         if 'file' not in request.files:
             print("No file part")
-            flash('No file part')
+            flash('No file part', "error")
             return redirect(request.url)
         file = request.files['file']
         # If the user does not select a file, the browser submits an
         # empty file without a filename.
         if file.filename == '':
-            flash('No selected file')
+            flash('No selected file', "error")
             return redirect('index')
         if file and os.path.splitext(file.filename)[-1] == ".json":
             print(f"Saving {file.filename}") 
@@ -96,7 +112,7 @@ def add_animation():
             dest_filename = Path(os.path.join(app.config['UPLOAD_FOLDER'], filename))
             file.save(dest_filename)
             activate_animation(dest_filename)
-            flash(f'Uploaded {dest_filename.stem}')
+            flash(f'Uploaded {dest_filename.stem}', "success")
             return redirect(url_for('index'))
         else:
             flash('Invalid animation file extension. Accepts .json')
