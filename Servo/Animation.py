@@ -145,12 +145,26 @@ class AnimationPlayer(object):
         return self
     
     def stop(self):
+        self.pause()
+        
+        # Remove power from servos
+        for servo_id in self.servos:
+           self.rotate_servo(servo_id, None)
+           
+        for anim in self.stack:
+            anim.current_frame = 0
+            
+        #self.looping = False
+        
+    def pause(self):
         self._is_playing = False
         self._next_frame_time = datetime.now()
-        #self.looping = False
         
     def play(self):
         self._is_playing  = True
+        
+    def is_playing(self):
+        return  self._is_playing
         
     def add_servo(self, servo_id, servo_name, remap_fn=None, pulse_width=None):
         self.servos[servo_id] = {
@@ -162,7 +176,7 @@ class AnimationPlayer(object):
             
     def rotate_servo(self, servo_id, value):
         try:
-            angle = self.servos[servo_id]["remap"](value)
+            angle = self.servos[servo_id]["remap"](value) if value is not None else None
             self.servos[servo_id]["servo"].angle = angle
         except ValueError as e:
             print(f"Angle {angle} out of range for servo {servo_id}. Ignoring")

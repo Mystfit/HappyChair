@@ -61,7 +61,7 @@ for anim_path in get_animation_paths(Path( __file__ ).absolute().parent /  "Anim
     
 @app.route('/')
 def index():
-    return render_template('index.html', animation_names=anim_layers.keys(), global_framerate=player.framerate)
+    return render_template('index.html', animation_names=anim_layers.keys(), global_framerate=player.framerate, transport_playing=player.is_playing())
 
 @app.route('/transport', methods=['POST'])
 def set_transport():
@@ -72,6 +72,9 @@ def set_transport():
         player.play()
     elif transport_status == "pause":
         flash('Transport paused', "light")
+        player.pause()
+    elif transport_status == "stop":
+        flash('Transport stopped', "light")
         player.stop()
     else:
         print("No transport change")
@@ -128,6 +131,6 @@ if __name__ == '__main__':
     player.add_servo(10, "elbow.L", None,  (500, 2500))
     player.add_servo(12, "hand.L", None,  (500, 2500))
     
-    player.play()
+    #player.play()
     
     app.run(host='0.0.0.0')
