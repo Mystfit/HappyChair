@@ -16,15 +16,21 @@ def map_range(value, start1, stop1, start2, stop2):
 
 
 class AnimationPlayer(object):
+    PLAYLIST_MODE = "playlist"
+    TRANSPORT_MODE = "transport"
+    LIVE_MODE = "live"
+
     def __init__(self):
         self.stack = []
         self.servos = {}
         self.steppers = {}
         self.kit = ServoKit(channels=16)
         self.anim_lock = Lock()
+        self.animation_thread = None
         
         self.framerate = 60
         self.stopped = False
+        self._animation_mode = AnimationPlayer.TRANSPORT_MODE
         self._is_playing = False
         self._next_frame_time = datetime.now()
         
@@ -35,7 +41,24 @@ class AnimationPlayer(object):
         self._interpolation_end_weight = 1.0
         self._interpolation_start_time = 0.0
         self._interpolation_end_time = 0.0
-
+        
+        # Live servo values from external sources
+        self._live_ws = False
+        
+    def animation_mode(self):
+        return self._animation_mode
+    
+    def set_animation_mode(self, mode):
+        self.set_live_mode(self.animation_mode() == AnimationPlayer.LIVE_MODE)
+        self._animation_mode = mode
+        
+    def set_live_mode(self, active):
+        if active:
+            self.stop()
+        else:
+            self.start()
+            
+        self._live_ws = active
         
     def add_layer(self, layer):
         self.stack.append(layer)
@@ -141,7 +164,8 @@ class AnimationPlayer(object):
                 break
     
     def start(self):
-        Thread(target=self.update,args=()).start()
+        self.stopped = False
+        self.animation_thread = Thread(target=self.update,args=()).start()
         return self
     
     def stop(self):
@@ -153,6 +177,8 @@ class AnimationPlayer(object):
            
         for anim in self.stack:
             anim.current_frame = 0
+            
+        self.stopped = True
             
         #self.looping = False
         
@@ -251,6 +277,32 @@ class Animation(object):
     
     def servo_pos_at_frame(self, servo_id, frame):
         return int(self.data["servos"][str(servo_id)]["positions"][frame])
+    
+    
+class Playlist(object):
+    def __init__(self, path):
+        self.name = os.path.basename(path)
+        f = open(path)
+        self.data = json.load(f)
+        f.close()
+        
+        self._current_animation_index = 0
+    
+    def get_current_animation_name(self):
+        if not len(self.data):
+            return ""
+        return str(self.data[self._current_animation_index]["name"])
+    
+    def get_current_animation_post_delay(self):
+        if not len(self.data):
+            return 0
+        return int(self.data[self._current_animation_index]["post_delay"])
+    
+    def get_pause_status(self):
+        if not len(self.data):
+            return False
+        return bool(self.data[self._current_animation_index]["pause_when_finished"]) 
+        
      
 
 if __name__ == "__main__":

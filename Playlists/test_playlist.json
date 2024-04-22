@@ -1,0 +1,17 @@
+[
+    {   
+        "name": "idle",
+        "post_delay": 5,
+        "pause_when_finished": false
+    },
+    {   
+        "name": "beckon",
+        "post_delay": 0,
+        "pause_when_finished": false
+    },
+    {   
+        "name": "beckon",
+        "post_delay": 0,
+        "pause_when_finished": false
+    }
+]

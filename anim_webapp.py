@@ -1,19 +1,21 @@
 from flask import Flask, render_template, request, flash, redirect, url_for
+from flask_sock import Sock
 from flask_bootstrap import Bootstrap
 from werkzeug.utils import secure_filename
-
-from Servo.Animation import Animation, AnimationPlayer, AnimationLayer
+from gevent import pywsgi
+from geventwebsocket.handler import WebSocketHandler
+from Servo.Animation import Animation, AnimationPlayer, AnimationLayer, Playlist
 from pathlib import Path
 
-import os
+import os, subprocess
 
 anim_layers = {}
+playlists = {}
 player = AnimationPlayer().start()
 
 
 def get_animation_paths(folder_path):
     json_files = []
-
     if not os.path.exists(folder_path) or not os.path.isdir(folder_path):
         return json_files
 
@@ -31,17 +33,30 @@ def activate_animation(anim_path):
     layer = AnimationLayer(animation, True, 0.0 if len(anim_layers) else 1.0)
     anim_layers[anim_path.stem] = layer
     player.add_layer(layer)
+    
+def activate_playlist(playlist_path):
+    global playlists
+    playlist = Playlist(playlist_path)
+    playlists[playlist_path.stem] = playlist
 
 
+# Set up flask app
 app = Flask(__name__)
+app.debug = True
+app.config['PLAYLIST_FOLDER'] = Path(os.path.dirname(os.path.abspath(__file__))) / "Playlists"
 app.config['UPLOAD_FOLDER'] = Path(os.path.dirname(os.path.abspath(__file__))) / "Animations"
 app.config['SECRET_KEY'] = 'HappyChairAnimations'
-
 Bootstrap(app)
-current_layer = None
 
+# Set up socketIO runner for flask app
+sock = Sock(app)
+
+current_layer = None
 for anim_path in get_animation_paths(Path( __file__ ).absolute().parent /  "Animations"):
     activate_animation(anim_path)
+    
+for playlist_path in get_animation_paths(Path( __file__ ).absolute().parent /  "Playlists"):
+    activate_playlist(playlist_path)
 #animations = {anim_path.stem: Animation(anim_path) for anim_path in get_animation_paths(Path( __file__ ).absolute().parent /  "Animations")}
 
 # Define your animations
@@ -61,7 +76,15 @@ for anim_path in get_animation_paths(Path( __file__ ).absolute().parent /  "Anim
     
 @app.route('/')
 def index():
-    return render_template('index.html', animation_names=anim_layers.keys(), global_framerate=player.framerate, transport_playing=player.is_playing())
+    return render_template(
+        'index.html',
+        animation_names=anim_layers.keys(),
+        global_framerate=player.framerate,
+        transport_playing=player.is_playing(),
+        playlist_names=playlists.keys(),
+        playlist_transport_playing=False,
+        animation_mode=player.animation_mode()
+    )
 
 @app.route('/transport', methods=['POST'])
 def set_transport():
@@ -94,6 +117,12 @@ def play_animation():
         player.animate_layer_weight(anim_layers[animation_name], float(animation_weight), float(interp_duration))
         return index()
     
+@app.route('/poweroff', methods=['POST'])
+def power_off():
+    subprocess.Popen(['sudo', 'shutdown', '-h', 'now'])
+    flash(f"Power off in process", "success")
+    return index()
+    
 @app.route('/animation/add', methods=['GET', 'POST'])
 def add_animation():
     if request.method == 'POST':
@@ -122,6 +151,89 @@ def add_animation():
     return redirect(url_for('index'))
 
 
+@app.route('/playlist/add', methods=['GET', 'POST'])
+def add_playlist():
+    if request.method == 'POST':
+        print(request.files)
+        # check if the post request has the file part
+        if 'file' not in request.files:
+            print("No file part")
+            flash('No file part', "error")
+            return redirect(request.url)
+        file = request.files['file']
+        # If the user does not select a file, the browser submits an
+        # empty file without a filename.
+        if file.filename == '':
+            flash('No selected file', "error")
+            return redirect('index')
+        if file and os.path.splitext(file.filename)[-1] == ".json":
+            print(f"Saving {file.filename}") 
+            filename = secure_filename(file.filename)
+            dest_filename = Path(os.path.join(app.config['PLAYLIST_FOLDER'], filename))
+            file.save(dest_filename)
+            
+            activate_playlist(dest_filename)
+            flash(f'Uploaded {dest_filename.stem}', "success")
+            return redirect(url_for('index'))
+        else:
+            flash('Invalid playlist file extension. Accepts .json')
+    return redirect(url_for('index'))
+
+@app.route('/playlist/transport', methods=['POST'])
+def set_playlist_transport():
+    global player
+    transport_status = request.form['transport']
+    if transport_status == "play":
+        flash('Playlist transport playing', "info")
+        #player.play()
+    elif transport_status == "pause":
+        flash('Playlist transport paused', "light")
+        #player.pause()
+    elif transport_status == "stop":
+        flash('Playlist transport stopped', "light")
+        #player.stop()
+    else:
+        print("No playlist transport change")
+    
+    return redirect(url_for('index'))
+
+
+'''
+Websocket routes for livestreamed animations
+'''
+# @socketio.on('connect')
+# def handle_connect():
+#     global player
+#     print("Websocket client connected")
+#     player.set_animation_mode(AnimationPlayer.LIVE_MODE)
+#     
+# @socketio.on('disconnnect')
+# def handle_disconnect():
+#     global player
+#     print("Websocket client disconnected")
+#     player.set_animation_mode(AnimationPlayer.TRANSPORT_MODE)
+
+@sock.route('/')
+def handle_blender_index(ws):
+    while not ws.closed:
+        message = ws.receive()
+        if message:    
+            print("Received connect message" + str(data))
+    
+@sock.route('/live')
+def handle_blender_live(ws):
+    global player
+    while True:
+        message = ws.receive()
+        command_start = message[0]
+        if command_start == 0x3c:
+            servo_id = int(message[1])
+            angle = int.from_bytes(message[2:4], byteorder='big')
+            command_end = message[4]
+            # print("Raw message: " + str(message )+ ", Servo ID: " + str(servo_id) + ", value: " + str(angle))
+            player.rotate_servo(servo_id, angle)
+
+
 if __name__ == '__main__':
     #player = AnimationPlayer().start()
     player.add_servo(15, "shoulder.R", None,  (500, 2500))
@@ -132,5 +244,6 @@ if __name__ == '__main__':
     player.add_servo(12, "hand.L", None,  (500, 2500))
     
     #player.play()
-    
-    app.run(host='0.0.0.0')
+    #server = pywsgi.WSGIServer(('', 5000), app, handler_class=WebSocketHandler)
+    #server.serve_forever()
+    app.run(host='0.0.0.0', port=5000)

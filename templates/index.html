@@ -41,15 +41,45 @@
         <div class="col">
             <div class="bs-component">
                 <form action="/transport" method="post">
-                    {% if transport_playing %}
-                    <button class="btn btn-light btn-lg" type="submit" name="transport" value="pause">Pause</button>
-                    {% else %}
-                    <button class="btn btn-primary btn-lg" type="submit" name="transport" value="play">Play</button>
+                    <legend>
+                    {% if animation_mode == "live" %}
+                        Live transport - ws://{{live_mode_address}}
+                    {% elif animation_mode == "playlist" %}
+                        Playlist transport
+                    {% elif animation_mode == "transport" %}
+                        Single animation transport
                     {% endif %}
-                    <button class="btn btn-danger btn-lg" type="submit" name="transport" value="stop">Stop</button>
-                    <button class="btn btn-primary btn-lg" type="submit" name="transport" value="update">Update speed</button>
-                    <label for="global_framerate" class="form-label">Global framerate:</label>
-                    <input class="form-select" id="global_framerate" name="global_framerate" type="number" step="any" min="0.001" value={{global_framerate}}>
+                    </legend>
+                    {% if animation_mode == "transport" or animation_mode == "playlist" %}
+                        {% if transport_playing%}
+                            <button class="btn btn-light btn-lg" type="submit" name="transport" value="pause">Pause</button>
+                        {% else %}
+                            <button class="btn btn-primary btn-lg" type="submit" name="transport" value="play">Play</button>
+                        {% endif %}
+                        <button class="btn btn-danger btn-lg" type="submit" name="transport" value="stop">Stop</button>
+                        <button class="btn btn-primary btn-lg" type="submit" name="transport" value="update">Update speed</button>
+                        <label for="global_framerate" class="form-label">Global framerate:</label>
+                        <input class="form-select" id="global_framerate" name="global_framerate" type="number" step="any" min="0.001" value={{global_framerate}}>
+                    {% endif %}
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="bs-docs-section">
+    <div class="row">
+        <div class="col">
+            <div class="page-header">
+                <h2>Power</h2>
+            </div>
+        </div>
+    </div>
+    <div class="row">
+        <div class="col">
+            <div class="bs-component">
+                <form action="/poweroff" method="post">
+                    <button class="btn btn-light btn-lg" type="submit" name="poweroff" value="">Power off</button>
                 </form>
             </div>
         </div>
@@ -90,19 +120,10 @@
             </div>
         </div>
     </div>
-</div>
-
-<div class="bs-docs-section">
-    <div class="row">
-        <div class="col">
-            <div class="page-header">
-                <h2>Upload</h2>
-            </div>
-        </div>
-    </div>
-    <div class="row">
+     <div class="row">
         <div class="col">
             <div class="bs-component">
+                <legend>Upload</legend>
                 <form action="/animation/add" method="post" enctype=multipart/form-data>
                     <input class="form-control" type="file" id="file" name="file" accept=".json">
                     <input class="btn btn-primary btn-lg" type="submit" value="Upload">
@@ -111,6 +132,54 @@
         </div>
     </div>
 </div>
+
+<div class="bs-docs-section">
+    <div class="row">
+        <div class="col">
+            <div class="page-header">
+                <h2>Playlists</h2>
+            </div>
+        </div>
+    </div>
+    <div class="row">
+        <div class="col">
+            <div class="bs-component">
+                <label for="playlistSelect" class="form-label mt-4">Choose playlist</label>
+                <select class="form-select" id="playlistSelect">
+                    {% for playlist_name in playlist_names %}
+                        <option>{{ playlist_name }}</option>
+                    {% endfor %}
+                </select>
+            </div>  
+        </div>
+    </div>
+    <div class="row">
+        <div class="col">
+            <div class="bs-component">
+                <form action="/playlist/transport" method="post">
+                    {% if playlist_transport_playing %}
+                    <button class="btn btn-light btn-lg" type="submit" name="transport" value="pause">Pause</button>
+                    {% else %}
+                    <button class="btn btn-primary btn-lg" type="submit" name="transport" value="play">Play</button>
+                    {% endif %}
+                    <button class="btn btn-danger btn-lg" type="submit" name="transport" value="stop">Stop</button>
+                </form>
+            </div>
+        </div>
+    </div>
+    <div class="row">
+        <div class="col">
+            <div class="bs-component">
+                <form action="/playlist/add" method="post" enctype=multipart/form-data>
+                    <legend>Upload</legend>
+                    <input class="form-control" type="file" id="file" name="file" accept=".json">
+                    <input class="btn btn-primary btn-lg" type="submit" value="Upload">
+                </form>
+            </div>  
+        </div>
+    </div>
+</div>
+
 
 
 {% endblock %}
