@@ -30,7 +30,7 @@ def get_animation_paths(folder_path):
 def activate_animation(anim_path):
     global anim_layers, player
     animation = Animation(anim_path)
-    layer = AnimationLayer(animation, True, 0.0 if len(anim_layers) else 1.0)
+    layer = AnimationLayer(animation, False, 0.0 if len(anim_layers) else 1.0)
     anim_layers[anim_path.stem] = layer
     player.add_layer(layer)
     
@@ -115,6 +115,7 @@ def play_animation():
     if animation_name in anim_layers:
         print("Starting animation")
         player.animate_layer_weight(anim_layers[animation_name], float(animation_weight), float(interp_duration))
+        anim_layers[animation_name].play()
         return index()
     
 @app.route('/poweroff', methods=['POST'])
@@ -183,15 +184,19 @@ def add_playlist():
 def set_playlist_transport():
     global player
     transport_status = request.form['transport']
+    playlist_name = str(request.form["playlistSelect"])
+    playlist = playlists[playlist_name]
+    print(f'Playlist transport status changed to: {transport_status}. Does it match? {transport_status == "play"}')
+
     if transport_status == "play":
         flash('Playlist transport playing', "info")
-        #player.play()
+        player.set_playlist(playlist)
     elif transport_status == "pause":
         flash('Playlist transport paused', "light")
-        #player.pause()
     elif transport_status == "stop":
         flash('Playlist transport stopped', "light")
-        #player.stop()
+        player.stop()
+        player.reset_playlist()
     else:
         print("No playlist transport change")
     

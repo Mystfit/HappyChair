@@ -144,12 +144,7 @@
     <div class="row">
         <div class="col">
             <div class="bs-component">
-                <label for="playlistSelect" class="form-label mt-4">Choose playlist</label>
-                <select class="form-select" id="playlistSelect">
-                    {% for playlist_name in playlist_names %}
-                        <option>{{ playlist_name }}</option>
-                    {% endfor %}
-                </select>
+                
             </div>  
         </div>
     </div>
@@ -157,6 +152,12 @@
         <div class="col">
             <div class="bs-component">
                 <form action="/playlist/transport" method="post">
+                    <label for="playlistSelect" class="form-label mt-4">Choose playlist</label>
+                    <select class="form-select" id="playlistSelect" name="playlistSelect">
+                        {% for playlist_name in playlist_names %}
+                            <option value="{{ playlist_name }}">{{ playlist_name }}</option>
+                        {% endfor %}
+                    </select>
                     {% if playlist_transport_playing %}
                     <button class="btn btn-light btn-lg" type="submit" name="transport" value="pause">Pause</button>
                     {% else %}

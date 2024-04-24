@@ -15,6 +15,33 @@ def map_range(value, start1, stop1, start2, stop2):
    return (value - start1) / (stop1 - start1) * (stop2 - start2) + start2
 
 
+class Playlist(object):
+    def __init__(self, path):
+        self.name = os.path.basename(path)
+        f = open(path)
+        self.data = json.load(f)
+        f.close()
+    
+    def get_animation_name(self, index):
+        if not len(self.data):
+            return ""
+        return str(self.data[index]["name"])
+    
+    def __len__(self):
+        return len(self.data)
+    
+    def get_animation_post_delay(self, index):
+        if not len(self.data):
+            return 0
+        return int(self.data[index]["post_delay"])
+    
+    def get_pause_status(self, index):
+        if not len(self.data):
+            return False
+        return bool(self.data[index]["pause_when_finished"]) 
+        
+
+
 class AnimationPlayer(object):
     PLAYLIST_MODE = "playlist"
     TRANSPORT_MODE = "transport"
@@ -45,6 +72,12 @@ class AnimationPlayer(object):
         # Live servo values from external sources
         self._live_ws = False
         
+        # Playlists
+        self._active_playlist = None
+        self._playlist_active_idx = 0
+        self._playlist_next_idx = 0
+        self._playlist_looping = True
+        
     def animation_mode(self):
         return self._animation_mode
     
@@ -60,11 +93,63 @@ class AnimationPlayer(object):
             
         self._live_ws = active
         
+    def set_playlist(self, playlist: Playlist):
+        self._active_playlist = playlist
+        self._playlist_active_idx = 0
+       
+        # Hook start animation
+        playlist_anim_name = self._active_playlist.get_animation_name(self._playlist_active_idx) if self._active_playlist else ""
+        print(f"Playlist first animation: {playlist_anim_name}")
+        if playlist_anim_name:
+            playlist_layer = self.get_layer_by_name(playlist_anim_name)
+
+        if playlist_layer: 
+            print(f"Hooking onComplete function to {playlist_anim_name}")
+            playlist_layer.on_complete = lambda: self.increment_playlist_animation()
+            playlist_layer.set_post_delay_frames(self._active_playlist.get_animation_post_delay(self._playlist_active_idx))
+            self.animate_layer_weight(playlist_layer, 1.0, 1.0)
+            playlist_layer.play()
+
+    def reset_playlist(self):
+        self._playlist_active_idx = 0
+        self._active_playlist = None
+
+    def increment_playlist_animation(self):
+        # Reset current animation hook since it has finished playing
+        playlist_anim_name = self._active_playlist.get_animation_name(self._playlist_active_idx) if self._active_playlist else ""
+        if playlist_anim_name:
+            playlist_layer = self.get_layer_by_name(playlist_anim_name)
+        playlist_layer.on_complete = None
+
+        # Set up next animation. By default, the playlist will loop
+        next_playlist_anim_idx = (self._playlist_active_idx + 1) % len(self._active_playlist)
+        next_playlist_anim_name = self._active_playlist.get_animation_name(next_playlist_anim_idx)
+        if next_playlist_anim_name:
+            next_playlist_layer = self.get_layer_by_name(next_playlist_anim_name)
+
+        print(f"Playlist transitioning from {playlist_anim_name} to {next_playlist_anim_name}")
+        
+        if next_playlist_layer:
+            # Hook playlist increment when current animation finishes playing
+            next_playlist_layer.on_complete = lambda: self.increment_playlist_animation()
+            next_playlist_layer.set_post_delay_frames(self._active_playlist.get_animation_post_delay(next_playlist_anim_idx))
+
+            # Interpolate next animation to avoid rapid servo movements
+            self.animate_layer_weight(next_playlist_layer, 1.0, 1.5)
+            next_playlist_layer.play()
+        
+        # Increment playlist index 
+        self._playlist_active_idx = next_playlist_anim_idx
+                
     def add_layer(self, layer):
         self.stack.append(layer)
         
     def remove_layer(self, layer):
         self.stack.remove(layer)
+        
+    def get_layer_by_name(self, layer_name):
+        layers = [layer for layer in self.stack if layer.current_animation.name.split('.json')[0] == layer_name]
+        return layers[0] if len(layers) else None
         
     def animate_layer_weight(self, layer, weight, duration):
         self._interpolating = True
@@ -105,7 +190,7 @@ class AnimationPlayer(object):
             # Set normalized weights
             for anim, norm_weight in zip(self.stack, weights):
                 clamped_weight = round(max(min(norm_weight, 1.0), 0.0),3)
-                print(f"Setting weight of layer {anim.current_animation.name} to {clamped_weight}")
+                #print(f"Setting weight of layer {anim.current_animation.name} to {clamped_weight}")
                 anim.weight = clamped_weight
         
     def update(self):
@@ -136,7 +221,6 @@ class AnimationPlayer(object):
                             lerp_amt = float((current_time - self._interpolation_start_time) / duration)
                             interpolated_weight = map_range(lerp_amt, 0.0, 1.0, self._interpolation_start_weight, self._interpolation_end_weight)
                             self.set_layer_weight(self._interpolation_layer, interpolated_weight)
-                        
                     
                     # Update all animation counters
                     for anim in self.stack:
@@ -216,6 +300,8 @@ class AnimationLayer(object):
         self.current_frame = 0
         self.weight = weight
         self._is_playing = True
+        self._post_delay_frames = 0
+        self._current_post_delay_frame_count = 0
         self.on_complete = on_completed_fn
         
     def start(self):
@@ -237,6 +323,10 @@ class AnimationLayer(object):
         
     def join(self):
         self.stopped  = True
+
+    def set_post_delay_frames(self, delay_frames):
+        print(f'Setting post-delay to {delay_frames} for animation {self.current_animation.name.split(".json")[0]}')
+        self._post_delay_frames = delay_frames
         
     def servo_angle(self, servo_id):
         if self.current_animation:
@@ -244,19 +334,32 @@ class AnimationLayer(object):
         return DEFAULT_SERVO_ANGLE
         
     def update(self):
-        #for servo_id in self.current_animation.data["servos"]:
-        #    self.rotate_servo(int(servo_id), self.current_animation.servo_pos_at_frame(servo_id, self.current_frame))
+        if not self._is_playing:
+            return
         
-        # Increment frame counter
-        self.current_frame += 1
-            
-        # Stop or loop the animation
         if self.current_animation:
-            if self.current_frame == self.current_animation.frames():
-                self.current_frame = 0
-                self.on_complete()
-                if not self.looping:
-                    self.stop()  
+            if self.current_frame + 1  < self.current_animation.frames():
+                # Increment frame counter
+                self.current_frame += 1
+            else:
+                if self.current_frame + 1 >= self.current_animation.frames():
+                    # We're in the post delay part of the animation
+                    print(f"Animation {self.current_animation.name.split('.json')[0]} finished but waiting for post-delay to expire. { self._post_delay_frames - self._current_post_delay_frame_count } frames remaining")
+                    self._current_post_delay_frame_count += 1
+
+                if self._current_post_delay_frame_count >= self._post_delay_frames:
+                    # Reset counters
+                    self._current_post_delay_frame_count = 0
+                    self.current_frame = 0
+
+                    # Trigger callbacks
+                    print(f'End of animation {self.current_animation.name.split(".json")[0]}')
+                    if self.on_complete:
+                        self.on_complete()
+
+                    # Handle looping
+                    if not self.looping:
+                        self.stop()
         
     def is_playing(self):
         return self._is_playing
@@ -278,31 +381,6 @@ class Animation(object):
     def servo_pos_at_frame(self, servo_id, frame):
         return int(self.data["servos"][str(servo_id)]["positions"][frame])
     
-    
-class Playlist(object):
-    def __init__(self, path):
-        self.name = os.path.basename(path)
-        f = open(path)
-        self.data = json.load(f)
-        f.close()
-        
-        self._current_animation_index = 0
-    
-    def get_current_animation_name(self):
-        if not len(self.data):
-            return ""
-        return str(self.data[self._current_animation_index]["name"])
-    
-    def get_current_animation_post_delay(self):
-        if not len(self.data):
-            return 0
-        return int(self.data[self._current_animation_index]["post_delay"])
-    
-    def get_pause_status(self):
-        if not len(self.data):
-            return False
-        return bool(self.data[self._current_animation_index]["pause_when_finished"]) 
-        
      
 
 if __name__ == "__main__":
