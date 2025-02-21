@@ -1,0 +1,92 @@
+[
+    {
+        "name": "wave_left",
+        "post_delay": 18000,
+        "pause_when_finished": false
+    },
+    {
+        "name": "hug_intro",
+        "post_delay": 10800,
+        "pause_when_finished": false
+    },
+    {
+        "name": "hug_exit",
+        "post_delay": 36000,
+        "pause_when_finished": false
+    },
+    {
+        "name": "shoulder_tap_right",
+        "post_delay": 18000,
+        "pause_when_finished": false
+    },
+    {
+        "name": "hug_small_intro",
+        "post_delay": 3600,
+        "pause_when_finished": false
+    },
+    {
+        "name": "hug_small_exit",
+        "post_delay": 54000,
+        "pause_when_finished": false
+    },
+    {
+        "name": "pat_left_small",
+        "post_delay": 54000,
+        "pause_when_finished": false
+    },
+    {
+        "name": "hug_small",
+        "post_delay": 30,
+        "pause_when_finished": false
+    },
+    {
+        "name": "shoulder_tap_right",
+        "post_delay": 30,
+        "pause_when_finished": false
+    },
+    {
+        "name": "idle",
+        "post_delay": 30,
+        "pause_when_finished": false
+    },
+    {
+        "name": "shoulder_tap_right",
+        "post_delay": 25200,
+        "pause_when_finished": false
+    },
+    {
+        "name": "wave_left",
+        "post_delay": 90000,
+        "pause_when_finished": false
+    },
+    {
+        "name": "hug_intro",
+        "post_delay": 36000,
+        "pause_when_finished": false
+    },
+    {
+        "name": "hug_exit",
+        "post_delay": 108000,
+        "pause_when_finished": false
+    },
+    {
+        "name": "wave_left",
+        "post_delay": 10800,
+        "pause_when_finished": false
+    },
+    {
+        "name": "take_break",
+        "post_delay": 54000,
+        "pause_when_finished": false
+    },
+    {
+        "name": "shoulder_tap_right",
+        "post_delay": 43200,
+        "pause_when_finished": false
+    },
+    {
+        "name": "hug_small",
+        "post_delay": 30,
+        "pause_when_finished": false
+    }
+]

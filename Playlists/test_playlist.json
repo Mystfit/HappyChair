@@ -1,0 +1,32 @@
+[
+    {   
+        "name": "beckon",
+        "post_delay": 400,
+        "pause_when_finished": false
+    },
+    {   
+        "name": "wave_left",
+        "post_delay": 400,
+        "pause_when_finished": false
+    },
+    {   
+        "name": "beckon",
+        "post_delay": 400,
+        "pause_when_finished": false
+    },
+    {   
+        "name": "beckon",
+        "post_delay": 400,
+        "pause_when_finished": false
+    },
+    {   
+        "name": "pat_left_small",
+        "post_delay": 400,
+        "pause_when_finished": false
+    },
+    {   
+        "name": "shoulder_tap_right",
+        "post_delay": 400,
+        "pause_when_finished": false
+    }
+]

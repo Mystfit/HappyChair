@@ -1,0 +1,112 @@
+[
+    {
+        "name": "wave_left",
+        "post_delay": 30,
+        "pause_when_finished": false
+    },
+    {
+	"name": "idle",
+	"post_delay": 30,
+	"pause_when_finished": false
+    },
+    {
+        "name": "wave_left",
+        "post_delay": 30,
+        "pause_when_finished": false
+    },
+    {
+        "name": "beckon",
+        "post_delay": 30,
+        "pause_when_finished": false
+    },
+    {
+        "name": "idle",
+        "post_delay": 3600,
+        "pause_when_finished": false
+    },
+    {
+        "name": "hug_small",
+        "post_delay": 30,
+        "pause_when_finished": false
+    },
+    {
+        "name": "idle",
+        "post_delay": 30,
+        "pause_when_finished": false
+    },
+    {
+        "name": "hug_small",
+        "post_delay": 30,
+        "pause_when_finished": false
+    },
+    {
+        "name": "idle",
+        "post_delay": 72000,
+        "pause_when_finished": false
+    },
+    {
+        "name": "pat_left_small",
+        "post_delay": 30,
+        "pause_when_finished": false
+    },
+    {
+        "name": "idle",
+        "post_delay": 18000,
+        "pause_when_finished": false
+    },
+    {
+        "name": "simple_hug_small",
+        "post_delay": 30,
+        "pause_when_finished": false
+    },
+    {
+        "name": "idle",
+        "post_delay": 36000,
+        "pause_when_finished": false
+    },
+    {
+        "name": "shoulder_tap_right_small",
+        "post_delay": 30,
+        "pause_when_finished": false
+    },
+    {
+        "name": "idle",
+        "post_delay": 18000,
+        "pause_when_finished": false
+    },
+    {
+        "name": "take_break",
+        "post_delay": 30,
+        "pause_when_finished": false
+    },
+    {
+        "name": "idle",
+        "post_delay": 600,
+        "pause_when_finished": false
+    },
+    {
+        "name": "celebrate",
+        "post_delay": 30,
+        "pause_when_finished": false
+    },
+    {
+        "name": "idle",
+        "post_delay": 72000,
+        "pause_when_finished": false
+    },
+    {
+        "name": "wave_left",
+        "post_delay": 30,
+        "pause_when_finished": false
+    },
+    {
+        "name": "excited",
+        "post_delay": 30,
+        "pause_when_finished": false
+    },
+    {
+        "name": "beckon",
+        "post_delay": 30,
+        "pause_when_finished": false
+    }
+]

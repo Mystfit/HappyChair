@@ -1,0 +1,22 @@
+[
+    {
+        "name": "hug_intro",
+        "post_delay": 600,
+        "pause_when_finished": false
+    },
+    {
+        "name": "hug_exit",
+        "post_delay": 600,
+        "pause_when_finished": false
+    },
+    {
+        "name": "hug_small_intro",
+        "post_delay": 600,
+        "pause_when_finished": false
+    },
+    {
+        "name": "hug_small_exit",
+        "post_delay": 600,
+        "pause_when_finished": false
+    }
+]
