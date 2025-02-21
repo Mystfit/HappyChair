@@ -164,6 +164,9 @@ class AnimationPlayer(object):
         weight = max(min(weight, 1.0), 0.0)
         weights = np.array([anim.weight for anim in self.stack])
         anim_idx = self.stack.index(layer)
+
+        # Non-idle rest pose weights total
+        weight_budget = 1.0
         
         # Calculate the sum of the weights without the modified item
         sum_without_modified_item = np.sum(weights) - weights[anim_idx] + weight        
@@ -189,10 +192,19 @@ class AnimationPlayer(object):
         with self.anim_lock:
             # Set normalized weights
             for anim, norm_weight in zip(self.stack, weights):
-                clamped_weight = round(max(min(norm_weight, 1.0), 0.0),3)
+                clamped_weight = max(min(norm_weight, 1.0), 0.0)
+                weight_budget -= clamped_weight
                 #print(f"Setting weight of layer {anim.current_animation.name} to {clamped_weight}")
-                anim.weight = clamped_weight
-        
+                anim.weight = clamped_weight #round(clamped_weight)
+
+        # Make sure that we always include the base idle layer when blending
+        rest_layer = self.get_layer_by_name("idle")
+        remaining_weights = max(min(weight_budget, 1.0), 0.0)
+        #print(f"Setting remaining weight budget to idle layer: {remaining_weights}")
+        rest_layer.weight += remaining_weights
+        rest_layer = max(min(rest_layer.weight, 1.0), 0.0)
+            
+         
     def update(self):
         while True:
             # Animation update code here
@@ -230,13 +242,16 @@ class AnimationPlayer(object):
                     with self.anim_lock:
                         weighted_layer_sum = np.zeros(len(self.servos))
                         for anim in self.stack:
+                            #print(f"Animation {anim.current_animation.name.split('.json')[0]} servo update")
                             # Read and sum angles together
                             anim_angles = np.zeros(len(self.servos))
                             servo_idx = 0
                             for servo_id, servo in self.servos.items():
                                 anim_angles[servo_idx] = anim.servo_angle(servo_id)
+                                weighted_layer_sum[servo_idx] += anim.servo_angle(servo_id) * anim.weight
                                 servo_idx += 1
-                            weighted_layer_sum += anim_angles * anim.weight
+                                #print(f"Servo ID: {servo_id}, Value: {anim.servo_angle(servo_id)}")
+                            #weighted_layer_sum += anim_angles * anim.weight
                     
                     # Rotate servos
                     for servo_id, angle in zip(self.servos, weighted_layer_sum):
@@ -350,7 +365,7 @@ class AnimationLayer(object):
                 if self._current_post_delay_frame_count >= self._post_delay_frames:
                     # Reset counters
                     self._current_post_delay_frame_count = 0
-                    self.current_frame = 0
+                    #self.current_frame = 0
 
                     # Trigger callbacks
                     print(f'End of animation {self.current_animation.name.split(".json")[0]}')
