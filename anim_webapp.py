@@ -76,6 +76,7 @@ for playlist_path in get_animation_paths(Path( __file__ ).absolute().parent /  "
     
 @app.route('/')
 def index():
+    active_tab = request.args.get('active_tab', '#transport-tab')
     return render_template(
         'index.html',
         animation_names=anim_layers.keys(),
@@ -83,13 +84,15 @@ def index():
         transport_playing=player.is_playing(),
         playlist_names=playlists.keys(),
         playlist_transport_playing=False,
-        animation_mode=player.animation_mode()
+        animation_mode=player.animation_mode(),
+        active_tab=active_tab
     )
 
 @app.route('/transport', methods=['POST'])
 def set_transport():
     global player
     transport_status = request.form['transport']
+    active_tab = request.form.get('active_tab', '#transport-tab')
     if transport_status == "play":
         flash('Transport playing', "info")
         player.play()
@@ -103,7 +106,7 @@ def set_transport():
         print("No transport change")
     print(request.form['global_framerate'])    
     player.framerate = float(request.form['global_framerate'])
-    return redirect(url_for('index'))
+    return redirect(url_for('index', active_tab=active_tab))
 
 @app.route('/animation/play', methods=['POST'])
 def play_animation():
@@ -111,34 +114,37 @@ def play_animation():
     animation_name = request.form['animation_name']
     animation_weight = request.form['weight']
     interp_duration = request.form['interpolation_duration']
+    active_tab = request.form.get('active_tab', '#transport-tab')
     
     if animation_name in anim_layers:
         print("Starting animation")
         player.animate_layer_weight(anim_layers[animation_name], float(animation_weight), float(interp_duration))
         anim_layers[animation_name].play()
-        return index()
+        return redirect(url_for('index', active_tab=active_tab))
     
 @app.route('/poweroff', methods=['POST'])
 def power_off():
+    active_tab = request.form.get('active_tab', '#transport-tab')
     subprocess.Popen(['sudo', 'shutdown', '-h', 'now'])
     flash(f"Power off in process", "success")
-    return index()
+    return redirect(url_for('index', active_tab=active_tab))
     
 @app.route('/animation/add', methods=['GET', 'POST'])
 def add_animation():
     if request.method == 'POST':
+        active_tab = request.form.get('active_tab', '#transport-tab')
         print(request.files)
         # check if the post request has the file part
         if 'file' not in request.files:
             print("No file part")
             flash('No file part', "error")
-            return redirect(request.url)
+            return redirect(url_for('index', active_tab=active_tab))
         file = request.files['file']
         # If the user does not select a file, the browser submits an
         # empty file without a filename.
         if file.filename == '':
             flash('No selected file', "error")
-            return redirect('index')
+            return redirect(url_for('index', active_tab=active_tab))
         if file and os.path.splitext(file.filename)[-1] == ".json":
             print(f"Saving {file.filename}") 
             filename = secure_filename(file.filename)
@@ -146,7 +152,7 @@ def add_animation():
             file.save(dest_filename)
             activate_animation(dest_filename)
             flash(f'Uploaded {dest_filename.stem}', "success")
-            return redirect(url_for('index'))
+            return redirect(url_for('index', active_tab=active_tab))
         else:
             flash('Invalid animation file extension. Accepts .json')
     return redirect(url_for('index'))
@@ -155,18 +161,19 @@ def add_animation():
 @app.route('/playlist/add', methods=['GET', 'POST'])
 def add_playlist():
     if request.method == 'POST':
+        active_tab = request.form.get('active_tab', '#transport-tab')
         print(request.files)
         # check if the post request has the file part
         if 'file' not in request.files:
             print("No file part")
             flash('No file part', "error")
-            return redirect(request.url)
+            return redirect(url_for('index', active_tab=active_tab))
         file = request.files['file']
         # If the user does not select a file, the browser submits an
         # empty file without a filename.
         if file.filename == '':
             flash('No selected file', "error")
-            return redirect('index')
+            return redirect(url_for('index', active_tab=active_tab))
         if file and os.path.splitext(file.filename)[-1] == ".json":
             print(f"Saving {file.filename}") 
             filename = secure_filename(file.filename)
@@ -175,7 +182,7 @@ def add_playlist():
             
             activate_playlist(dest_filename)
             flash(f'Uploaded {dest_filename.stem}', "success")
-            return redirect(url_for('index'))
+            return redirect(url_for('index', active_tab=active_tab))
         else:
             flash('Invalid playlist file extension. Accepts .json')
     return redirect(url_for('index'))
@@ -185,6 +192,7 @@ def set_playlist_transport():
     global player
     transport_status = request.form['transport']
     playlist_name = str(request.form["playlistSelect"])
+    active_tab = request.form.get('active_tab', '#transport-tab')
     playlist = playlists[playlist_name]
     print(f'Playlist transport status changed to: {transport_status}. Does it match? {transport_status == "play"}')
 
@@ -200,7 +208,7 @@ def set_playlist_transport():
     else:
         print("No playlist transport change")
     
-    return redirect(url_for('index'))
+    return redirect(url_for('index', active_tab=active_tab))
 
 
 '''

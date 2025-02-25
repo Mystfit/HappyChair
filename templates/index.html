@@ -9,17 +9,52 @@
 {{super()}}
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
 <script>
-    document.addEventListener('DOMContentLoaded', function() {
-        // Initialize all tabs
-        var triggerTabList = [].slice.call(document.querySelectorAll('button[data-bs-toggle="tab"]'));
-        triggerTabList.forEach(function(triggerEl) {
-            var tabTrigger = new bootstrap.Tab(triggerEl);
-            
-            triggerEl.addEventListener('click', function(event) {
-                event.preventDefault();
-                tabTrigger.show();
-            });
+    function updateActiveTab() {
+        const activeTab = document.querySelector('.nav-link.active');
+        document.querySelectorAll('form').forEach(form => {
+            let input = form.querySelector('input[name="active_tab"]');
+            if (!input) {
+                input = document.createElement('input');
+                input.type = 'hidden';
+                input.name = 'active_tab';
+                form.appendChild(input);
+            }
+            input.value = activeTab.id;
         });
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
+        // Wait for Bootstrap to be fully loaded
+        //setTimeout(function() {
+            // Set up tab event listeners
+            document.querySelectorAll('button[data-bs-toggle="tab"]').forEach(function(triggerEl) {
+                triggerEl.addEventListener('shown.bs.tab', function() {
+                    updateActiveTab();
+                });
+            });
+
+            // Set the initial active tab if provided by server
+            const serverActiveTab = '{{ active_tab }}';
+            if (serverActiveTab) {
+                // Remove the '#' from the ID when using querySelector
+                const tabId = serverActiveTab.replace('#', '');
+                const tabToActivate = document.getElementById(tabId);
+                if (tabToActivate) {
+                    const tab = new bootstrap.Tab(tabToActivate);
+                    tab.show();
+                }
+            }
+
+            // Ensure forms have the active tab value
+            updateActiveTab();
+
+            // Update active tab before form submission
+            document.querySelectorAll('form').forEach(form => {
+                form.addEventListener('submit', function() {
+                    updateActiveTab();
+                });
+            });
+        //}, 1); // Small delay to ensure Bootstrap is ready
     });
 </script>
 {% endblock %}

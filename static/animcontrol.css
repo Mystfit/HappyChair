@@ -47,7 +47,7 @@
 
 .tab-pane.fade {
     opacity: 0;
-    transition: opacity 0.15s linear;
+    transition: opacity 0.1s linear;
 }
 
 .tab-pane.fade.show {
