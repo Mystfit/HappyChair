@@ -51,7 +51,13 @@ class AnimationPlayer(object):
         self.stack = []
         self.servos = {}
         self.steppers = {}
-        self.kit = ServoKit(channels=16)
+
+        self.kit = None
+        try:
+            self.kit = ServoKit(channels=16)
+        except ValueError as e:
+            print(f"Could not initialize servos. Error: {e}")
+
         self.anim_lock = Lock()
         self.animation_thread = None
         
@@ -292,6 +298,9 @@ class AnimationPlayer(object):
         return  self._is_playing
         
     def add_servo(self, servo_id, servo_name, remap_fn=None, pulse_width=None):
+        if not self.kit:
+            print(f"Can't add servo {servo_id}. Servokit is not initialized.")
+            return
         self.servos[servo_id] = {
             "servo": self.kit.servo[servo_id],
             "remap": remap_fn if remap_fn else lambda angle: angle
@@ -301,8 +310,14 @@ class AnimationPlayer(object):
             
     def rotate_servo(self, servo_id, value):
         try:
-            angle = self.servos[servo_id]["remap"](value) if value is not None else None
-            self.servos[servo_id]["servo"].angle = angle
+            servo = self.servos[servo_id]
+        except KeyError:
+            print(f"Can't rotate servo {servo_id}, servo not found.")
+            return
+        
+        try:
+            angle = servo["remap"](value) if value is not None else None
+            servo["servo"].angle = angle
         except ValueError as e:
             print(f"Angle {angle} out of range for servo {servo_id}. Ignoring")
 
