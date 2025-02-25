@@ -1,3 +1,74 @@
 .bs-docs-section {
-    margin-top: 4em
+    margin-top: 4em;
+}
+
+/* Tab styling */
+.nav-tabs {
+    border-bottom: 1px solid #444;
+    margin-bottom: 20px;
+}
+
+.nav-tabs .nav-link {
+    color: #adb5bd;
+    border: 1px solid transparent;
+    margin-bottom: -1px;
+    padding: 10px 15px;
+    transition: all 0.3s ease;
+}
+
+.nav-tabs .nav-link:hover {
+    border-color: #444;
+    color: #fff;
+}
+
+.nav-tabs .nav-link.active {
+    color: #fff;
+    background-color: #375a7f;
+    border-color: #444;
+}
+
+/* Tab content styling */
+.tab-content {
+    padding: 20px;
+    background-color: #303030;
+    border: 1px solid #444;
+    border-top: none;
+    border-radius: 0 0 4px 4px;
+}
+
+.tab-pane {
+    padding: 15px 0;
+    display: none;
+}
+
+.tab-pane.active {
+    display: block;
+}
+
+.tab-pane.fade {
+    opacity: 0;
+    transition: opacity 0.15s linear;
+}
+
+.tab-pane.fade.show {
+    opacity: 1;
+}
+
+/* Animation grid styling */
+.animation-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    max-width: 1500px; /* Ensures max 6 columns at 150px each + gaps */
+    gap: 10px;
+    margin-top: 15px;
+}
+
+.animation-grid .animation-button {
+    width: 100%;
+    height: 100%;
+    min-height:100px;
+    white-space: normal;
+    word-wrap: break-word;
+    text-align: center;
+    margin: 0;
 }
