@@ -1,0 +1,202 @@
+body {
+  margin: 0;
+  padding: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: #303030;
+  color: #fff;
+}
+
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+h1, h2, h3 {
+  color: #fff;
+}
+
+button {
+  cursor: pointer;
+  padding: 8px 16px;
+  margin: 5px;
+  background-color: #4CAF50;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 14px;
+}
+
+button:hover {
+  background-color: #45a049;
+}
+
+button:disabled {
+  background-color: #cccccc;
+  cursor: not-allowed;
+}
+
+input, select {
+  padding: 8px;
+  margin: 5px;
+  border-radius: 4px;
+  border: 1px solid #444;
+  background-color: #424242;
+  color: #fff;
+}
+
+label {
+  margin-right: 10px;
+}
+
+/* Tabs styling */
+.tabs {
+  margin-top: 20px;
+}
+
+.tab-buttons {
+  display: flex;
+  border-bottom: 1px solid #444;
+  margin-bottom: 20px;
+}
+
+.tab-buttons button {
+  background-color: transparent;
+  color: #adb5bd;
+  border: 1px solid transparent;
+  margin-bottom: -1px;
+  padding: 10px 15px;
+  transition: all 0.3s ease;
+}
+
+.tab-buttons button:hover {
+  border-color: #444;
+  color: #fff;
+}
+
+.tab-buttons button.active {
+  color: #fff;
+  background-color: #375a7f;
+  border-color: #444;
+}
+
+.tab-content {
+  padding: 20px;
+  background-color: #303030;
+  border: 1px solid #444;
+  border-top: none;
+  border-radius: 0 0 4px 4px;
+}
+
+/* Panel styling */
+.panel {
+  margin-bottom: 20px;
+}
+
+.control-panel {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 20px;
+  align-items: center;
+}
+
+.framerate-control {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.control-settings {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  margin-bottom: 20px;
+}
+
+.setting-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.animation-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 15px;
+  margin-bottom: 20px;
+}
+
+.animation-item {
+  border: 1px solid #444;
+  border-radius: 4px;
+  padding: 15px;
+  background-color: #424242;
+}
+
+.animation-item button {
+  width: 100%;
+  height: 100%;
+  min-height: 60px;
+  white-space: normal;
+  word-wrap: break-word;
+  text-align: center;
+  margin: 0;
+}
+
+.animation-item:hover {
+  background-color: #505050;
+}
+
+.playlist-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  margin-bottom: 20px;
+}
+
+.playlist-selector {
+  display: flex;
+  align-items: center;
+}
+
+.playlist-transport {
+  display: flex;
+  gap: 10px;
+}
+
+.upload-section {
+  margin-top: 20px;
+  padding: 15px;
+  border: 1px solid #444;
+  border-radius: 4px;
+  background-color: #424242;
+}
+
+.upload-section input[type="file"] {
+  display: none;
+}
+
+.status-indicator {
+  margin-top: 20px;
+  padding: 10px;
+  border-radius: 4px;
+}
+
+.status-indicator.success {
+  background-color: #28a745;
+  color: #fff;
+}
+
+.status-indicator.error {
+  background-color: #dc3545;
+  color: #fff;
+}
+
+.status-indicator.info {
+  background-color: #17a2b8;
+  color: #fff;
+}
