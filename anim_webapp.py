@@ -12,9 +12,10 @@ import os, subprocess, json, time
 
 # Dictionary to store available animations (Animation objects)
 available_animations = {}
+
 # Animation layers are now stored directly in the AnimationPlayer
 playlists = {}
-player = AnimationPlayer().start()
+player = AnimationPlayer()
 
 
 def get_animation_paths(folder_path):
@@ -334,15 +335,15 @@ def animation_status(ws):
         while ws.connected:
             # Get animation mode from player
             anim_mode = player.animation_mode()
-            print(f"Current animation mode: {anim_mode}")
+            # print(f"Current animation mode: {anim_mode}")
             
             # Get active animations directly from the player
             active_animations = player.get_active_layers()
             
             # Debug print
-            print(f"Active animations: {len(active_animations)}")
-            for anim in active_animations:
-                print(f"  {anim['name']}: playing={anim['is_playing']}, weight={anim['weight']}, frame={anim['current_frame']}/{anim['total_frames']}")
+            # print(f"Active animations: {len(active_animations)}")
+            # for anim in active_animations:
+            #     print(f"  {anim['name']}: playing={anim['is_playing']}, weight={anim['weight']}, frame={anim['current_frame']}/{anim['total_frames']}")
             
             status = {
                 'is_playing': player.is_playing(),
@@ -353,7 +354,7 @@ def animation_status(ws):
             
             try:
                 ws.send(json.dumps(status))
-                time.sleep(0.1)  # Update every 100ms
+                time.sleep(1 / player.framerate)  # Update at framerate
             except Exception as inner_e:
                 print(f"WebSocket send error: {inner_e}")
                 break
@@ -381,7 +382,13 @@ def handle_blender_live(ws):
             command_end = message[4]
             # print("Raw message: " + str(message )+ ", Servo ID: " + str(servo_id) + ", value: " + str(angle))
             player.rotate_servo(servo_id, angle)
+            
 
+
+# Create a single base layer that we can return to when animations finish playing
+base_layer = create_animation_layer("idle", 1.0, True)
+base_layer.play()
+player.start()
 
 if __name__ == '__main__':
     #player = AnimationPlayer().start()

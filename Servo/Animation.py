@@ -66,6 +66,7 @@ class AnimationPlayer(object):
         self._animation_mode = AnimationPlayer.TRANSPORT_MODE
         self._is_playing = False
         self._next_frame_time = datetime.now()
+        self._last_frame_time = datetime.now()
         
         # Interpolation
         self._interpolating = False
@@ -74,6 +75,7 @@ class AnimationPlayer(object):
         self._interpolation_end_weight = 1.0
         self._interpolation_start_time = 0.0
         self._interpolation_end_time = 0.0
+        self._interpolation_duration = 1.0 
         
         # Live servo values from external sources
         self._live_ws = False
@@ -162,7 +164,12 @@ class AnimationPlayer(object):
             transient = not loop and self.animation_mode() == AnimationPlayer.TRANSPORT_MODE
         
         layer = AnimationLayer(animation, loop, weight, transient=transient)
+        
+        # Set callbacks to trigger when layer is ready to blend out
+        layer.blend_out_frame_duration = self._interpolation_duration * self.framerate
+        layer.on_start_blend_out = lambda: self.animate_layer_weight(layer, 0.0, self._interpolation_duration)
         layer._animation_name = name  # Store the name on the layer itself
+        
         self.add_layer(layer)
         
         # Make sure the layer is playing state is set
@@ -209,57 +216,44 @@ class AnimationPlayer(object):
         self._interpolation_layer = layer
         
     def set_layer_weight(self, layer, weight):
-        # Weights can only be in the range 0.0-1.0
         weight = max(min(weight, 1.0), 0.0)
         weights = np.array([anim.weight for anim in self.stack])
-        anim_idx = None
+        
         try:
             anim_idx = self.stack.index(layer)
         except ValueError:
             return
-
-        # Non-idle rest pose weights total
-        weight_budget = 1.0
         
-        # Calculate the sum of the weights without the modified item
-        sum_without_modified_item = np.sum(weights) - weights[anim_idx] + weight        
+        # Set target weight
         weights[anim_idx] = weight
         
-        # Calculate the scaling factor required to adjust the sum to 1.0
-        scaling_factor = 1.0 / (sum_without_modified_item + weight)#(sum_without_modified_item + weight)
-        if scaling_factor >= 0:
-            for i in range(len(weights)):
-                if i != anim_idx:
-                    weights[i] *= scaling_factor
-        else:
-            print("Scaling factor is negative")
-            weights[anim_idx] = 1.0
-            
-            # Recalculate the scaling factor and distribute proportionally
-            scaling_factor = 1.0 / (sum_without_modified_item - weights[anim_idx])
-            for i in range(len(arr)):
-                if i != anim_idx:
-                    weights[i] *= scaling_factor
+        # Calculate remaining weight to distribute
+        remaining_weight = 1.0 - weight
+        other_indices = [i for i in range(len(weights)) if i != anim_idx]
         
-        # Aquire anim lock so we don't end up with broken weights whilst the anim thread reads from the layer stack
-        with self.anim_lock:
-            # Set normalized weights
-            for anim, norm_weight in zip(self.stack, weights):
-                clamped_weight = max(min(norm_weight, 1.0), 0.0)
-                weight_budget -= clamped_weight
-                #print(f"Setting weight of layer {anim.current_animation.name} to {clamped_weight}")
-                anim.weight = clamped_weight #round(clamped_weight)
-
-        # Check if we have any remaining weight budget
-        remaining_weights = max(min(weight_budget, 1.0), 0.0)
-        if remaining_weights > 0:
-            # Try to find an idle layer to distribute the remaining weight to
-            rest_layer = self.get_layer_by_name("idle")
-            if rest_layer:
-                #print(f"Setting remaining weight budget to idle layer: {remaining_weights}")
-                rest_layer.weight += remaining_weights
-                rest_layer.weight = max(min(rest_layer.weight, 1.0), 0.0)
+        if remaining_weight > 0 and len(other_indices) > 0:
+            # Get current sum of other weights
+            other_sum = np.sum(weights[other_indices])
             
+            if other_sum > 0:
+                # Scale other weights proportionally
+                scale = remaining_weight / other_sum
+                for i in other_indices:
+                    weights[i] *= scale
+            else:
+                # Distribute equally if all other weights are 0
+                equal_weight = remaining_weight / len(other_indices)
+                for i in other_indices:
+                    weights[i] = equal_weight
+        else:
+            # Set all other weights to 0
+            for i in other_indices:
+                weights[i] = 0.0
+        
+        # Apply weights
+        with self.anim_lock:
+            for anim, norm_weight in zip(self.stack, weights):
+                anim.weight = max(min(norm_weight, 1.0), 0.0)
          
     def update(self):
         while True:
@@ -274,7 +268,9 @@ class AnimationPlayer(object):
                 #print(f"Current frame time: {current_frame_time}, Next frame time: {self._next_frame_time}")
                 if current_frame_time >= self._next_frame_time:
                     self._next_frame_time = current_frame_time + timedelta(seconds=(1.0 / self.framerate))
-                    
+                    frame_delta = current_frame_time - self._last_frame_time
+                    self._last_frame_time = current_frame_time
+
                     # Interpolate weights
                     if self._interpolating:
                         current_time = datetime.now()
@@ -292,7 +288,7 @@ class AnimationPlayer(object):
                     
                     # Update all animation counters and check for completed transient layers
                     for anim in list(self.stack):  # Use a copy of the list to safely modify during iteration
-                        anim.update()
+                        anim.update(delta=frame_delta, framerate=self.framerate)
                         
                         # Check if this is a transient layer that has completed
                         if hasattr(anim, 'transient') and anim.transient and anim.is_completed:
@@ -378,7 +374,7 @@ class AnimationPlayer(object):
 
 
 class AnimationLayer(object):
-    def __init__(self, animation, loop = False, weight = 1.0, on_completed_fn = lambda: None, transient = False):
+    def __init__(self, animation, loop = False, weight = 1.0, on_completed_fn = lambda: None, transient = False, blend_out_frames = 60, on_start_blend_out_fn = lambda: None):
         self.looping = loop
         self.current_animation = animation
         self.bone_direction_remap = {}
@@ -388,6 +384,9 @@ class AnimationLayer(object):
         self._post_delay_frames = 0
         self._current_post_delay_frame_count = 0
         self.on_complete = on_completed_fn
+        self.blend_out_frame_duration = blend_out_frames
+        self.on_start_blend_out = on_start_blend_out_fn
+        self._blending_out = False
         self.transient = transient  # Whether this layer should be removed automatically when completed
         self._animation_name = None  # Will be set when added to the player
         
@@ -433,11 +432,11 @@ class AnimationLayer(object):
         play_status = not self._is_playing
         post_delay_status = (self._current_post_delay_frame_count >= self._post_delay_frames)
         
-        print(f"Animation {self.current_animation.name.split('.json')[0]} completion check: " + 
-              f"frame:{self.current_frame}/{self.current_animation.frames()} " +
-              f"playing:{self._is_playing} " + 
-              f"post_delay:{self._current_post_delay_frame_count}/{self._post_delay_frames} " +
-              f"is_completed:{play_status and frame_status and post_delay_status}")
+        # print(f"Animation {self.current_animation.name.split('.json')[0]} completion check: " + 
+        #       f"frame:{self.current_frame}/{self.current_animation.frames()} " +
+        #       f"playing:{self._is_playing} " + 
+        #       f"post_delay:{self._current_post_delay_frame_count}/{self._post_delay_frames} " +
+        #       f"is_completed:{play_status and frame_status and post_delay_status}")
             
         # An animation is complete if:
         # 1. It's not playing
@@ -447,16 +446,24 @@ class AnimationLayer(object):
                 self.current_frame + 1 >= self.current_animation.frames() and
                 self._current_post_delay_frame_count >= self._post_delay_frames)
     
-    def update(self):
+    def update(self, delta: timedelta = None, framerate=60):
         if not self._is_playing:
             return
         
+        next_frame = self.current_frame + round(delta.total_seconds() * framerate)
         if self.current_animation:
-            if self.current_frame + 1  < self.current_animation.frames():
+            if next_frame < self.current_animation.frames():
                 # Increment frame counter
-                self.current_frame += 1
+                self.current_frame = next_frame
+                
+                # Trigger callback that this layer should start to blend out
+                #print(f"Current frame {self.current_frame} Total frames {self.current_animation.frames()} Blend out {self.blend_out_duration}")
+                if self.current_frame >= self.current_animation.frames() - self.blend_out_frame_duration and not self.looping and not self._blending_out:
+                    self._blending_out = True
+                    self.on_start_blend_out()
+                        
             else:
-                if self.current_frame + 1 >= self.current_animation.frames():
+                if next_frame >= self.current_animation.frames():
                     # We're in the post delay part of the animation
                     print(f"Animation {self.current_animation.name.split('.json')[0]} finished but waiting for post-delay to expire. { self._post_delay_frames - self._current_post_delay_frame_count } frames remaining")
                     self._current_post_delay_frame_count += 1
@@ -471,8 +478,14 @@ class AnimationLayer(object):
                         self.on_complete()
 
                     # Handle looping
-                    if not self.looping:
+                    if self.looping:
+                        self.current_frame = 0
+                    else:
                         self.stop()
+                        
+                    self._blending_out = False
+                        
+                    
         
     def is_playing(self):
         return self._is_playing
