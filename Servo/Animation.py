@@ -208,12 +208,16 @@ class AnimationPlayer(object):
         return layers
         
     def animate_layer_weight(self, layer, weight, duration):
+        if not layer:
+            return
+        
         self._interpolating = True
         self._interpolation_start_time = datetime.now()
         self._interpolation_end_time = self._interpolation_start_time + timedelta(seconds=duration)
         self._interpolation_start_weight = layer.weight
         self._interpolation_end_weight = weight
         self._interpolation_layer = layer
+        layer.blend_out_frame_duration = duration * self.framerate
         
     def set_layer_weight(self, layer, weight):
         weight = max(min(weight, 1.0), 0.0)
@@ -450,7 +454,7 @@ class AnimationLayer(object):
         if not self._is_playing:
             return
         
-        next_frame = self.current_frame + round(delta.total_seconds() * framerate)
+        next_frame = self.current_frame + math.floor(delta.total_seconds() * framerate)
         if self.current_animation:
             if next_frame < self.current_animation.frames():
                 # Increment frame counter
