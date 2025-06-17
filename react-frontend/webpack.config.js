@@ -8,6 +8,8 @@ module.exports = {
     filename: 'bundle.js',
     publicPath: '/'
   },
+  mode: 'development', // Use development mode to avoid minification
+  devtool: 'source-map', // Generate source maps for easier debugging
   module: {
     rules: [
       {

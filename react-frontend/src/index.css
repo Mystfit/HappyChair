@@ -200,3 +200,256 @@ label {
   background-color: #17a2b8;
   color: #fff;
 }
+
+/* Animation Layers Timeline Styling */
+.layer-mode-toggle {
+  margin-bottom: 20px;
+  padding: 15px;
+  border: 1px solid #444;
+  border-radius: 4px;
+  background-color: #424242;
+}
+
+.layer-mode-toggle select {
+  margin-left: 10px;
+}
+
+.mode-description {
+  margin-top: 10px;
+  font-size: 0.9em;
+  color: #adb5bd;
+}
+
+.layer-controls {
+  margin-bottom: 15px;
+}
+
+.add-layer-btn {
+  background-color: #375a7f;
+}
+
+.add-layer-btn:hover {
+  background-color: #2b4764;
+}
+
+.timeline-container {
+  margin-bottom: 20px;
+  border: 1px solid #444;
+  border-radius: 4px;
+  background-color: #303030;
+  padding: 10px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+@keyframes slideUp {
+  0% {
+    opacity: 1;
+    transform: translateY(0);
+    max-height: 200px;
+    margin-bottom: 10px;
+  }
+  70% {
+    opacity: 0.5;
+    transform: translateY(-15px);
+    max-height: 100px;
+    margin-bottom: 5px;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-30px);
+    max-height: 0;
+    margin-bottom: 0;
+    padding: 0;
+    border-width: 0;
+  }
+}
+
+.timeline-layer {
+  margin-bottom: 10px;
+  border: 1px solid #444;
+  border-radius: 4px;
+  background-color: #424242;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  overflow: hidden;
+}
+
+.timeline-layer.removing {
+  animation: slideUp 1s ease-in-out forwards;
+  pointer-events: none; /* Prevent interactions during removal animation */
+  border-color: #ff5722; /* Highlight border during removal */
+  box-shadow: 0 0 8px rgba(255, 87, 34, 0.3); /* Add glow effect during removal */
+}
+
+.timeline-layer:hover {
+  background-color: #505050;
+}
+
+.timeline-layer.selected {
+  border-color: #4CAF50;
+  box-shadow: 0 0 5px rgba(76, 175, 80, 0.5);
+}
+
+.layer-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background-color: #333;
+  border-top-left-radius: 3px;
+  border-top-right-radius: 3px;
+}
+
+/* Base layer styling */
+.base-layer-header {
+  background-color: #1a3a5f; /* Darker blue to distinguish from regular layers */
+  border-bottom: 2px solid #4CAF50; /* Green border to highlight importance */
+}
+
+.timeline-layer:first-child {
+  margin-bottom: 20px; /* Add extra space after the base layer */
+}
+
+.layer-name {
+  font-weight: bold;
+}
+
+.layer-header-controls {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.layer-transport-controls {
+  display: flex;
+  gap: 2px;
+  margin-right: 5px;
+}
+
+.remove-layer-btn {
+  background-color: transparent;
+  color: #fff;
+  border: none;
+  font-size: 18px;
+  padding: 0 5px;
+  margin: 0;
+  cursor: pointer;
+}
+
+.remove-layer-btn:hover {
+  color: #dc3545;
+  background-color: transparent;
+}
+
+.layer-track {
+  height: 60px;
+  padding: 10px;
+  position: relative;
+  background-color: #383838;
+  overflow: hidden; /* Ensure content stays within bounds */
+}
+
+.animation-clip {
+  position: relative;
+  height: 100%;
+  width: 100%;
+  background-color: rgba(76, 175, 80, 0.3);
+  border-radius: 3px;
+  padding: 5px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  transition: background-color 0.3s ease;
+  box-sizing: border-box; /* Include padding in width/height calculation */
+  overflow: hidden; /* Ensure content stays within bounds */
+}
+
+.animation-clip:hover {
+  background-color: rgba(76, 175, 80, 0.5) !important;
+}
+
+.clip-name {
+  font-weight: bold;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+  margin-right: 10px;
+}
+
+.clip-weight {
+  font-size: 0.8em;
+  background-color: rgba(0, 0, 0, 0.3);
+  padding: 2px 5px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.clip-weight:hover {
+  background-color: rgba(0, 0, 0, 0.5);
+}
+
+.playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background-color: #ff5722;
+  z-index: 10;
+  left: 0%; /* This will be updated dynamically based on animation progress */
+}
+
+/* Transport controls */
+.clip-transport-controls {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  display: flex;
+  gap: 2px;
+  z-index: 20;
+}
+
+.transport-btn {
+  background-color: rgba(0, 0, 0, 0.3);
+  color: white;
+  border: none;
+  border-radius: 3px;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  margin: 0;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.transport-btn:hover {
+  background-color: rgba(0, 0, 0, 0.5);
+}
+
+.play-btn {
+  background-color: rgba(76, 175, 80, 0.5);
+}
+
+.play-btn:hover {
+  background-color: rgba(76, 175, 80, 0.7);
+}
+
+.pause-btn {
+  background-color: rgba(255, 193, 7, 0.5);
+}
+
+.pause-btn:hover {
+  background-color: rgba(255, 193, 7, 0.7);
+}
+
+.rewind-btn {
+  background-color: rgba(33, 150, 243, 0.5);
+}
+
+.rewind-btn:hover {
+  background-color: rgba(33, 150, 243, 0.7);
+}

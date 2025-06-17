@@ -8,9 +8,11 @@ from geventwebsocket.handler import WebSocketHandler
 from Servo.Animation import Animation, AnimationPlayer, AnimationLayer, Playlist
 from pathlib import Path
 
-import os, subprocess
+import os, subprocess, json, time
 
-anim_layers = {}
+# Dictionary to store available animations (Animation objects)
+available_animations = {}
+# Animation layers are now stored directly in the AnimationPlayer
 playlists = {}
 player = AnimationPlayer().start()
 
@@ -28,12 +30,23 @@ def get_animation_paths(folder_path):
 
     return json_files
 
-def activate_animation(anim_path):
-    global anim_layers, player
+def load_animation(anim_path):
+    """Load an animation file into the available_animations dictionary"""
+    global available_animations
     animation = Animation(anim_path)
-    layer = AnimationLayer(animation, False, 0.0 if len(anim_layers) else 1.0)
-    anim_layers[anim_path.stem] = layer
-    player.add_layer(layer)
+    available_animations[anim_path.stem] = animation
+    print(f"Loaded animation: {anim_path.stem}")
+    
+def create_animation_layer(animation_name, weight=0.0, loop=False):
+    """Create an animation layer for the specified animation and add it to the player"""
+    global available_animations, player
+    if animation_name not in available_animations:
+        print(f"Animation not found: {animation_name}")
+        return None
+    
+    animation = available_animations[animation_name]
+    # Use the player's create_layer method to create and add the layer
+    return player.create_layer(animation, animation_name, weight, loop)
     
 def activate_playlist(playlist_path):
     global playlists
@@ -54,11 +67,15 @@ CORS(app)  # Enable CORS for all routes
 sock = Sock(app)
 
 current_layer = None
+# Load all animations but don't create layers for them
 for anim_path in get_animation_paths(Path( __file__ ).absolute().parent /  "Animations"):
-    activate_animation(anim_path)
+    load_animation(anim_path)
     
 for playlist_path in get_animation_paths(Path( __file__ ).absolute().parent /  "Playlists"):
     activate_playlist(playlist_path)
+    
+# We've removed the automatic base idle layer to fix layer management issues
+# Animation layers will now only be created when animations are played
 #animations = {anim_path.stem: Animation(anim_path) for anim_path in get_animation_paths(Path( __file__ ).absolute().parent /  "Animations")}
 
 # Define your animations
@@ -88,7 +105,7 @@ def serve(path):
 # Legacy template route for backward compatibility
 @app.route('/legacy')
 def legacy_interface():
-    animation_names = list(anim_layers.keys())
+    animation_names = list(available_animations.keys())
     playlist_names = list(playlists.keys())
     return render_template('index.html', 
                           animation_names=animation_names, 
@@ -103,7 +120,7 @@ def legacy_interface():
 @app.route('/api/animations', methods=['GET'])
 def get_animations():
     return jsonify({
-        'animations': list(anim_layers.keys()),
+        'animations': list(available_animations.keys()),
         'global_framerate': player.framerate,
         'transport_playing': player.is_playing(),
         'animation_mode': player.animation_mode()
@@ -140,22 +157,87 @@ def api_set_transport():
 
 @app.route('/api/animation/play', methods=['POST'])
 def api_play_animation():
-    global current_layer, player
+    global player, available_animations
     data = request.json
     animation_name = data.get('animation_name')
     animation_weight = data.get('weight')
     interp_duration = data.get('interpolation_duration')
     
-    if animation_name in anim_layers:
-        print("Starting animation")
-        player.animate_layer_weight(anim_layers[animation_name], float(animation_weight), float(interp_duration))
-        anim_layers[animation_name].play()
+    # Check if the animation exists in available animations
+    if animation_name in available_animations:
+        # Get the layer if it exists, or create a new one
+        layer = player.get_layer_by_name(animation_name)
+        
+        if not layer:
+            print(f"Creating new layer for animation: {animation_name}")
+            # Non-looping by default in dynamic mode
+            layer = create_animation_layer(animation_name, float(animation_weight), False)
+            if not layer:
+                return jsonify({'success': False, 'error': 'Failed to create animation layer'}), 500
+        else:
+            # Ensure existing layers are non-looping if playing again
+            layer.looping = False
+        
+        print(f"Starting animation: {animation_name} with looping={layer.looping}")
+        player.animate_layer_weight(layer, float(animation_weight), float(interp_duration))
+        # Play but preserve the non-looping setting
+        layer.play(loop=False)
+        
         return jsonify({
             'success': True,
             'animation': animation_name,
             'weight': animation_weight,
             'duration': interp_duration
         })
+    
+    return jsonify({'success': False, 'error': 'Animation not found'}), 404
+
+@app.route('/api/animation/pause', methods=['POST'])
+def api_pause_animation():
+    global player, available_animations
+    data = request.json
+    animation_name = data.get('animation_name')
+    
+    # Check if the animation exists in available animations
+    if animation_name in available_animations:
+        # Get the layer if it exists
+        layer = player.get_layer_by_name(animation_name)
+        
+        if layer:
+            print(f"Pausing animation: {animation_name}")
+            layer.pause()
+            return jsonify({
+                'success': True,
+                'animation': animation_name,
+                'message': f'Animation {animation_name} paused'
+            })
+        else:
+            return jsonify({'success': False, 'error': 'Animation layer not created yet'}), 400
+    
+    return jsonify({'success': False, 'error': 'Animation not found'}), 404
+
+@app.route('/api/animation/rewind', methods=['POST'])
+def api_rewind_animation():
+    global player, available_animations
+    data = request.json
+    animation_name = data.get('animation_name')
+    
+    # Check if the animation exists in available animations
+    if animation_name in available_animations:
+        # Get the layer if it exists
+        layer = player.get_layer_by_name(animation_name)
+        
+        if layer:
+            print(f"Rewinding animation: {animation_name}")
+            # Reset the animation to frame 0
+            layer.current_frame = 0
+            return jsonify({
+                'success': True,
+                'animation': animation_name,
+                'message': f'Animation {animation_name} rewound to start'
+            })
+        else:
+            return jsonify({'success': False, 'error': 'Animation layer not created yet'}), 400
     
     return jsonify({'success': False, 'error': 'Animation not found'}), 404
     
@@ -178,7 +260,10 @@ def api_add_animation():
         filename = secure_filename(file.filename)
         dest_filename = Path(os.path.join(app.config['UPLOAD_FOLDER'], filename))
         file.save(dest_filename)
-        activate_animation(dest_filename)
+        
+        # Load the animation into available_animations
+        load_animation(dest_filename)
+        
         return jsonify({
             'success': True, 
             'message': f'Uploaded {dest_filename.stem}',
@@ -245,20 +330,37 @@ def api_set_playlist_transport():
 def animation_status(ws):
     global player
     try:
-        while not ws.closed:
+        # Check if the WebSocket is still connected
+        while ws.connected:
+            # Get animation mode from player
+            anim_mode = player.animation_mode()
+            print(f"Current animation mode: {anim_mode}")
+            
+            # Get active animations directly from the player
+            active_animations = player.get_active_layers()
+            
+            # Debug print
+            print(f"Active animations: {len(active_animations)}")
+            for anim in active_animations:
+                print(f"  {anim['name']}: playing={anim['is_playing']}, weight={anim['weight']}, frame={anim['current_frame']}/{anim['total_frames']}")
+            
             status = {
                 'is_playing': player.is_playing(),
                 'animation_mode': player.animation_mode(),
                 'global_framerate': player.framerate,
-                'active_animations': [
-                    {'name': name, 'weight': layer.weight}
-                    for name, layer in anim_layers.items()
-                ]
+                'active_animations': active_animations
             }
-            ws.send(json.dumps(status))
-            time.sleep(0.1)  # Update every 100ms
+            
+            try:
+                ws.send(json.dumps(status))
+                time.sleep(0.1)  # Update every 100ms
+            except Exception as inner_e:
+                print(f"WebSocket send error: {inner_e}")
+                break
     except Exception as e:
         print(f"WebSocket error: {e}")
+    finally:
+        print("WebSocket connection closed")
 
 @sock.route('/')
 def handle_blender_index(ws):

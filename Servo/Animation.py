@@ -151,11 +151,54 @@ class AnimationPlayer(object):
         self.stack.append(layer)
         
     def remove_layer(self, layer):
+        # Remove the layer from the stack only - anim_layers sync should be handled in anim_webapp.py
+        print(f"Removing layer from stack: {layer.current_animation.name.split('.json')[0]}")
         self.stack.remove(layer)
         
+    def create_layer(self, animation, name, weight=0.0, loop=False, transient=None):
+        """Create an animation layer and add it to the player"""
+        # If transient is None, default to the appropriate value based on mode and loop status
+        if transient is None:
+            transient = not loop and self.animation_mode() == AnimationPlayer.TRANSPORT_MODE
+        
+        layer = AnimationLayer(animation, loop, weight, transient=transient)
+        layer._animation_name = name  # Store the name on the layer itself
+        self.add_layer(layer)
+        
+        # Make sure the layer is playing state is set
+        layer._is_playing = True
+        
+        # Debug output
+        print(f"Created animation layer: {name}, weight={weight}, loop={loop}, transient={transient}")
+        
+        return layer
+        
     def get_layer_by_name(self, layer_name):
+        """Get a layer by its animation name"""
+        # First try to find by _animation_name property if it exists
+        for layer in self.stack:
+            if hasattr(layer, '_animation_name') and layer._animation_name == layer_name:
+                return layer
+                
+        # Fall back to the previous behavior for backward compatibility
         layers = [layer for layer in self.stack if layer.current_animation.name.split('.json')[0] == layer_name]
         return layers[0] if len(layers) else None
+        
+    def get_active_layers(self):
+        """Get all active animation layers in a format suitable for the frontend"""
+        layers = []
+        for layer in self.stack:
+            # Get the layer name, either from _animation_name property or from animation filename
+            name = layer._animation_name if hasattr(layer, '_animation_name') and layer._animation_name else layer.current_animation.name.split('.json')[0]
+            
+            layers.append({
+                'name': name,
+                'weight': layer.weight,
+                'current_frame': layer.current_frame,
+                'total_frames': layer.current_animation.frames() if layer.current_animation else 0,
+                'is_playing': layer.is_playing()
+            })
+        return layers
         
     def animate_layer_weight(self, layer, weight, duration):
         self._interpolating = True
@@ -169,7 +212,11 @@ class AnimationPlayer(object):
         # Weights can only be in the range 0.0-1.0
         weight = max(min(weight, 1.0), 0.0)
         weights = np.array([anim.weight for anim in self.stack])
-        anim_idx = self.stack.index(layer)
+        anim_idx = None
+        try:
+            anim_idx = self.stack.index(layer)
+        except ValueError:
+            return
 
         # Non-idle rest pose weights total
         weight_budget = 1.0
@@ -203,12 +250,15 @@ class AnimationPlayer(object):
                 #print(f"Setting weight of layer {anim.current_animation.name} to {clamped_weight}")
                 anim.weight = clamped_weight #round(clamped_weight)
 
-        # Make sure that we always include the base idle layer when blending
-        rest_layer = self.get_layer_by_name("idle")
+        # Check if we have any remaining weight budget
         remaining_weights = max(min(weight_budget, 1.0), 0.0)
-        #print(f"Setting remaining weight budget to idle layer: {remaining_weights}")
-        rest_layer.weight += remaining_weights
-        rest_layer = max(min(rest_layer.weight, 1.0), 0.0)
+        if remaining_weights > 0:
+            # Try to find an idle layer to distribute the remaining weight to
+            rest_layer = self.get_layer_by_name("idle")
+            if rest_layer:
+                #print(f"Setting remaining weight budget to idle layer: {remaining_weights}")
+                rest_layer.weight += remaining_weights
+                rest_layer.weight = max(min(rest_layer.weight, 1.0), 0.0)
             
          
     def update(self):
@@ -240,9 +290,14 @@ class AnimationPlayer(object):
                             interpolated_weight = map_range(lerp_amt, 0.0, 1.0, self._interpolation_start_weight, self._interpolation_end_weight)
                             self.set_layer_weight(self._interpolation_layer, interpolated_weight)
                     
-                    # Update all animation counters
-                    for anim in self.stack:
+                    # Update all animation counters and check for completed transient layers
+                    for anim in list(self.stack):  # Use a copy of the list to safely modify during iteration
                         anim.update()
+                        
+                        # Check if this is a transient layer that has completed
+                        if hasattr(anim, 'transient') and anim.transient and anim.is_completed:
+                            print(f"Removing completed transient layer: {anim.current_animation.name.split('.json')[0]}")
+                            self.remove_layer(anim)
                     
                     # Aquire animation lock to guarantee normalized weights
                     with self.anim_lock:
@@ -323,7 +378,7 @@ class AnimationPlayer(object):
 
 
 class AnimationLayer(object):
-    def __init__(self, animation, loop = False, weight = 1.0, on_completed_fn = lambda: None):
+    def __init__(self, animation, loop = False, weight = 1.0, on_completed_fn = lambda: None, transient = False):
         self.looping = loop
         self.current_animation = animation
         self.bone_direction_remap = {}
@@ -333,14 +388,18 @@ class AnimationLayer(object):
         self._post_delay_frames = 0
         self._current_post_delay_frame_count = 0
         self.on_complete = on_completed_fn
+        self.transient = transient  # Whether this layer should be removed automatically when completed
+        self._animation_name = None  # Will be set when added to the player
         
     def start(self):
        pass
     
-    def play(self, loop=False, from_frame=0):
+    def play(self, loop=None, from_frame=0):
         self.current_frame = from_frame
         self._is_playing = True
-        self.looping = loop
+        # Only update looping if explicitly provided
+        if loop is not None:
+            self.looping = loop
         
     def pause(self):
         self._is_playing = False
@@ -363,6 +422,31 @@ class AnimationLayer(object):
             return self.current_animation.servo_pos_at_frame(servo_id, self.current_frame)
         return DEFAULT_SERVO_ANGLE
         
+    # Property to check if this layer has completed playing
+    @property
+    def is_completed(self):
+        if not self.current_animation:
+            return False
+        
+        # Debug logging to help track animation completion
+        frame_status = (self.current_frame + 1 >= self.current_animation.frames())
+        play_status = not self._is_playing
+        post_delay_status = (self._current_post_delay_frame_count >= self._post_delay_frames)
+        
+        print(f"Animation {self.current_animation.name.split('.json')[0]} completion check: " + 
+              f"frame:{self.current_frame}/{self.current_animation.frames()} " +
+              f"playing:{self._is_playing} " + 
+              f"post_delay:{self._current_post_delay_frame_count}/{self._post_delay_frames} " +
+              f"is_completed:{play_status and frame_status and post_delay_status}")
+            
+        # An animation is complete if:
+        # 1. It's not playing
+        # 2. It has reached its last frame
+        # 3. Any post-delay has expired
+        return (not self._is_playing and 
+                self.current_frame + 1 >= self.current_animation.frames() and
+                self._current_post_delay_frame_count >= self._post_delay_frames)
+    
     def update(self):
         if not self._is_playing:
             return
@@ -380,8 +464,7 @@ class AnimationLayer(object):
                 if self._current_post_delay_frame_count >= self._post_delay_frames:
                     # Reset counters
                     self._current_post_delay_frame_count = 0
-                    #self.current_frame = 0
-
+                    
                     # Trigger callbacks
                     print(f'End of animation {self.current_animation.name.split(".json")[0]}')
                     if self.on_complete:
