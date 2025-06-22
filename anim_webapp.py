@@ -354,7 +354,7 @@ def animation_status(ws):
             
             try:
                 ws.send(json.dumps(status))
-                time.sleep(1 / player.framerate)  # Update at framerate
+                time.sleep(1 / player.framerate * 0.5)  # Update at framerate
             except Exception as inner_e:
                 print(f"WebSocket send error: {inner_e}")
                 break
