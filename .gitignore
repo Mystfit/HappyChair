@@ -1,2 +1,5 @@
-react-frontend/node_modules
-react-frontend/build
+react-frontend/node_modules/
+react-frontend/build/
+resources/
+.venv/
+.venv.bak/
