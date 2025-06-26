@@ -3,6 +3,7 @@ import TransportPanel from './components/TransportPanel';
 import PowerPanel from './components/PowerPanel';
 import LayersPanel from './components/LayersPanel';
 import PlaylistsPanel from './components/PlaylistsPanel';
+import CameraPanel from './components/CameraPanel';
 import StatusIndicator from './components/StatusIndicator';
 
 function App() {
@@ -257,6 +258,12 @@ function App() {
           >
             Playlists
           </button>
+          <button 
+            className={activeTab === 'camera' ? 'active' : ''} 
+            onClick={() => setActiveTab('camera')}
+          >
+            Camera
+          </button>
         </div>
         
         <div className="tab-content">
@@ -287,6 +294,12 @@ function App() {
               playlistTransportPlaying={playlistTransportPlaying}
               onPlaylistAction={handlePlaylistAction}
               onUploadPlaylist={(file) => handleFileUpload('playlist', file)}
+            />
+          )}
+          
+          {activeTab === 'camera' && (
+            <CameraPanel 
+              onStatusUpdate={setStatus}
             />
           )}
         </div>

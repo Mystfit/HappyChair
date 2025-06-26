@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, flash, redirect, url_for, jsonify, send_from_directory
+from flask import Flask, render_template, request, flash, redirect, url_for, jsonify, send_from_directory, Response
 from flask_sock import Sock
 from flask_bootstrap import Bootstrap
 from flask_cors import CORS
@@ -7,6 +7,9 @@ from gevent import pywsgi
 from geventwebsocket.handler import WebSocketHandler
 from Servo.Animation import Animation, AnimationPlayer, AnimationLayer, Playlist
 from pathlib import Path
+from persondetection import PersonDetection
+import cv2
+import numpy as np
 
 import os, subprocess, json, time
 
@@ -66,6 +69,9 @@ CORS(app)  # Enable CORS for all routes
 
 # Set up socketIO runner for flask app
 sock = Sock(app)
+
+# Initialize person detection
+person_detector = None
 
 current_layer = None
 # Load all animations but don't create layers for them
@@ -324,6 +330,116 @@ def api_set_playlist_transport():
         'transport_status': transport_status,
         'playlist_name': playlist_name
     })
+
+# Camera API Endpoints
+@app.route('/api/camera/start', methods=['POST'])
+def api_start_camera():
+    global person_detector
+    try:
+        if not person_detector:
+            person_detector = PersonDetection()
+        
+        if person_detector.start_detection():
+            return jsonify({
+                'success': True,
+                'message': 'Camera started successfully'
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'Camera is already running'
+            }), 400
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'Failed to start camera: {str(e)}'
+        }), 500
+
+@app.route('/api/camera/stop', methods=['POST'])
+def api_stop_camera():
+    global person_detector
+    try:
+        if person_detector and person_detector.stop_detection():
+            return jsonify({
+                'success': True,
+                'message': 'Camera stopped successfully'
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'Camera is not running'
+            }), 400
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'Failed to stop camera: {str(e)}'
+        }), 500
+
+@app.route('/api/camera/status', methods=['GET'])
+def api_camera_status():
+    global person_detector
+    try:
+        if person_detector:
+            stats = person_detector.get_detection_stats()
+            return jsonify({
+                'success': True,
+                'running': person_detector.is_running(),
+                'stats': stats
+            })
+        else:
+            return jsonify({
+                'success': True,
+                'running': False,
+                'stats': {
+                    'person_count': 0,
+                    'total_detections': 0,
+                    'last_update': 0,
+                    'fps': 0
+                }
+            })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'Failed to get camera status: {str(e)}'
+        }), 500
+
+@app.route('/api/camera/stream')
+def api_camera_stream():
+    global person_detector
+    
+    def generate_frames():
+        while True:
+            try:
+                if person_detector and person_detector.is_running():
+                    frame = person_detector.get_latest_frame()
+                    if frame is not None:
+                        # Encode frame as JPEG
+                        _, buffer = cv2.imencode('.jpg', frame, 
+                                              [cv2.IMWRITE_JPEG_QUALITY, 85])
+                        
+                        # Yield frame in multipart format
+                        yield (b'--frame\r\n'
+                               b'Content-Type: image/jpeg\r\n\r\n' + 
+                               buffer.tobytes() + b'\r\n')
+                else:
+                    # Send a blank frame if camera is not running
+                    blank_frame = np.zeros((480, 640, 3), dtype=np.uint8)
+                    cv2.putText(blank_frame, "Camera Not Active", (200, 240), 
+                              cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+                    
+                    _, buffer = cv2.imencode('.jpg', blank_frame)
+                    yield (b'--frame\r\n'
+                           b'Content-Type: image/jpeg\r\n\r\n' + 
+                           buffer.tobytes() + b'\r\n')
+                
+                #time.sleep(0.033)  # ~30 FPS
+                
+            except Exception as e:
+                print(f"Error in camera stream: {e}")
+                #time.sleep(0.1)
+    
+    return Response(generate_frames(),
+                   mimetype='multipart/x-mixed-replace; boundary=frame')
 
 
 # WebSocket routes
