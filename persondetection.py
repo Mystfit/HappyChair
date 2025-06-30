@@ -139,6 +139,10 @@ class PersonDetection(app_callback_class):
         }
         self._stats_lock = threading.Lock()
         
+    def shutdown(self, signum=None, frame=None):
+        if self.gstreamer_app:
+            self.gstreamer_app.shutdown(signum, frame)
+        
     def start_detection(self):
         """Start the detection pipeline in a separate thread"""
         if not self.running:

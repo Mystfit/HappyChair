@@ -1,3 +1,4 @@
+import signal
 from flask import Flask, render_template, request, flash, redirect, url_for, jsonify, send_from_directory, Response
 from flask_sock import Sock
 from flask_bootstrap import Bootstrap
@@ -7,11 +8,11 @@ from gevent import pywsgi
 from geventwebsocket.handler import WebSocketHandler
 from Servo.Animation import Animation, AnimationPlayer, AnimationLayer, Playlist
 from pathlib import Path
-from persondetection import PersonDetection
+from detection_multiprocess import PersonDetectionMultiprocess
 import cv2
 import numpy as np
 
-import os, subprocess, json, time
+import os, subprocess, json, time, sys
 
 # Dictionary to store available animations (Animation objects)
 available_animations = {}
@@ -20,6 +21,10 @@ available_animations = {}
 playlists = {}
 player = AnimationPlayer()
 
+def shutdown(signum, frame):
+    if person_detector:
+        person_detector.shutdown()
+    sys.exit()
 
 def get_animation_paths(folder_path):
     json_files = []
@@ -337,12 +342,13 @@ def api_start_camera():
     global person_detector
     try:
         if not person_detector:
-            person_detector = PersonDetection()
+            person_detector = PersonDetectionMultiprocess("happychair_detection_buffer")
         
         if person_detector.start_detection():
             return jsonify({
                 'success': True,
-                'message': 'Camera started successfully'
+                'message': 'Camera started successfully (multiprocessing mode)',
+                'process_info': person_detector.get_process_info()
             })
         else:
             return jsonify({
@@ -403,21 +409,90 @@ def api_camera_status():
             'error': f'Failed to get camera status: {str(e)}'
         }), 500
 
+@app.route('/api/camera/restart', methods=['POST'])
+def api_restart_camera():
+    global person_detector
+    try:
+        if person_detector:
+            if person_detector.restart_detection():
+                return jsonify({
+                    'success': True,
+                    'message': 'Camera restarted successfully',
+                    'process_info': person_detector.get_process_info()
+                })
+            else:
+                return jsonify({
+                    'success': False,
+                    'error': 'Failed to restart camera'
+                }), 500
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'Camera not initialized'
+            }), 400
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'Failed to restart camera: {str(e)}'
+        }), 500
+
+@app.route('/api/camera/process-info', methods=['GET'])
+def api_camera_process_info():
+    global person_detector
+    try:
+        if person_detector:
+            return jsonify({
+                'success': True,
+                'process_info': person_detector.get_process_info(),
+                'running': person_detector.is_running()
+            })
+        else:
+            return jsonify({
+                'success': True,
+                'process_info': {'status': 'not_initialized'},
+                'running': False
+            })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'Failed to get process info: {str(e)}'
+        }), 500
+
 @app.route('/api/camera/stream')
 def api_camera_stream():
     global person_detector
     
     def generate_frames():
+        last_frame_time = time.time()
+        frame_interval = 1.0 / 30.0  # Target 30 FPS for stream
+        
         while True:
             try:
+                current_time = time.time()
+                
                 if person_detector and person_detector.is_running():
                     frame = person_detector.get_latest_frame()
                     if frame is not None:
-                        # Encode frame as JPEG
-                        _, buffer = cv2.imencode('.jpg', frame, 
-                                              [cv2.IMWRITE_JPEG_QUALITY, 85])
+                        # Encode frame as JPEG with optimized quality
+                        encode_params = [
+                            cv2.IMWRITE_JPEG_QUALITY, 80,
+                            cv2.IMWRITE_JPEG_OPTIMIZE, 1
+                        ]
+                        _, buffer = cv2.imencode('.jpg', frame, encode_params)
                         
                         # Yield frame in multipart format
+                        yield (b'--frame\r\n'
+                               b'Content-Type: image/jpeg\r\n\r\n' + 
+                               buffer.tobytes() + b'\r\n')
+                        
+                        last_frame_time = current_time
+                    else:
+                        # No frame available, send a waiting message
+                        waiting_frame = np.zeros((480, 640, 3), dtype=np.uint8)
+                        cv2.putText(waiting_frame, "Waiting for frames...", (180, 240), 
+                                  cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 0), 2)
+                        
+                        _, buffer = cv2.imencode('.jpg', waiting_frame)
                         yield (b'--frame\r\n'
                                b'Content-Type: image/jpeg\r\n\r\n' + 
                                buffer.tobytes() + b'\r\n')
@@ -426,17 +501,23 @@ def api_camera_stream():
                     blank_frame = np.zeros((480, 640, 3), dtype=np.uint8)
                     cv2.putText(blank_frame, "Camera Not Active", (200, 240), 
                               cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+                    cv2.putText(blank_frame, "Multiprocessing Mode", (180, 280), 
+                              cv2.FONT_HERSHEY_SIMPLEX, 0.7, (128, 128, 128), 1)
                     
                     _, buffer = cv2.imencode('.jpg', blank_frame)
                     yield (b'--frame\r\n'
                            b'Content-Type: image/jpeg\r\n\r\n' + 
                            buffer.tobytes() + b'\r\n')
                 
-                #time.sleep(0.033)  # ~30 FPS
+                # Control frame rate to prevent overwhelming the client
+                elapsed = time.time() - current_time
+                sleep_time = max(0, frame_interval - elapsed)
+                if sleep_time > 0:
+                    time.sleep(sleep_time)
                 
             except Exception as e:
                 print(f"Error in camera stream: {e}")
-                #time.sleep(0.1)
+                time.sleep(0.1)  # Brief pause on error
     
     return Response(generate_frames(),
                    mimetype='multipart/x-mixed-replace; boundary=frame')
@@ -507,6 +588,9 @@ base_layer.play()
 player.start()
 
 if __name__ == '__main__':
+    # Set up signal handler for SIGINT (Ctrl-C)
+    signal.signal(signal.SIGINT, shutdown)
+        
     #player = AnimationPlayer().start()
     player.add_servo(15, "shoulder.R", None,  (500, 2500))
     player.add_servo(14, "elbow.R", None,  (500, 2500))
