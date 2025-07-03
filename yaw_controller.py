@@ -1,6 +1,6 @@
 """
-YawController class for managing person detection and camera yaw control.
-Integrates PersonDetectionMultiprocess with motor control for person tracking.
+YawController class for managing camera yaw control and motor operations.
+Subscribes to IOController events for person detection data.
 """
 
 import threading
@@ -8,20 +8,17 @@ import time
 import math
 from typing import Optional, Dict, Any
 from adafruit_motorkit import MotorKit
-from detection_multiprocess import PersonDetectionMultiprocess
 
 
 class YawController:
     """
     Controls camera yaw rotation to track detected persons.
-    Manages PersonDetectionMultiprocess and motor control in a unified interface.
+    Subscribes to IOController events for person detection data.
     """
     
-    def __init__(self, buffer_name: str = "happychair_detection_buffer"):
-        self.buffer_name = buffer_name
-        
-        # Detection system
-        self.person_detector = None
+    def __init__(self, io_controller=None):
+        # IOController reference for event subscription
+        self.io_controller = io_controller
         
         # Motor control
         self.motor_kit = None
@@ -30,6 +27,7 @@ class YawController:
         # Person tracking
         self.tracked_person_id = None
         self.tracking_enabled = False
+        self.latest_detections = []
         
         # Camera and control parameters
         self.camera_width = 1280  # From shared_memory_manager.py
@@ -49,41 +47,26 @@ class YawController:
         self.control_thread_running = False
         self.control_lock = threading.Lock()
         
-        # Statistics
-        self.unique_people_seen = set()
+        # Register for IOController events
+        if self.io_controller:
+            self.io_controller.register_event_callback(self._handle_io_event)
         
         print("YawController initialized")
     
-    def start_detection(self) -> bool:
-        """Start the person detection system"""
-        try:
-            if not self.person_detector:
-                self.person_detector = PersonDetectionMultiprocess(self.buffer_name)
-            
-            if self.person_detector.start_detection():
-                print("YawController: Detection started successfully")
-                return True
-            else:
-                print("YawController: Failed to start detection")
-                return False
-                
-        except Exception as e:
-            print(f"YawController: Error starting detection: {e}")
-            return False
-    
-    def stop_detection(self) -> bool:
-        """Stop the person detection system"""
-        try:
-            if self.person_detector and self.person_detector.stop_detection():
-                print("YawController: Detection stopped successfully")
-                return True
-            else:
-                print("YawController: Failed to stop detection or not running")
-                return False
-                
-        except Exception as e:
-            print(f"YawController: Error stopping detection: {e}")
-            return False
+    def _handle_io_event(self, event: Dict[str, Any]):
+        """Handle events from IOController"""
+        event_type = event.get('type')
+        data = event.get('data', {})
+        
+        if event_type == 'person_detected':
+            # Update latest detections for motor control
+            with self.control_lock:
+                self.latest_detections = data.get('detections', [])
+        elif event_type == 'pin_changed':
+            # Handle GPIO pin changes if needed for future logic
+            pin = data.get('pin')
+            state = data.get('state')
+            print(f"YawController: GPIO pin {pin} changed to {state}")
     
     def start_motor_control(self) -> bool:
         """Initialize and start motor control"""
@@ -166,19 +149,13 @@ class YawController:
                     time.sleep(0.1)
                     continue
                 
-                # Get latest detection results
-                if not self.person_detector or not self.person_detector.is_running():
+                # Get latest detection results from IOController events
+                with self.control_lock:
+                    detections = self.latest_detections.copy()
+                
+                if not detections:
                     time.sleep(0.1)
                     continue
-                
-                stats = self.person_detector.get_detection_stats()
-                detections = stats.get('detections', [])
-                
-                # Update unique people count
-                for detection in detections:
-                    track_id = detection.get('track_id', 0)
-                    if track_id > 0:
-                        self.unique_people_seen.add(track_id)
                 
                 # Find person to track
                 target_detection = self._find_target_person(detections)
@@ -307,74 +284,31 @@ class YawController:
             except Exception as e:
                 print(f"YawController: Error stopping motor: {e}")
     
-    def get_detection_stats(self) -> Dict[str, Any]:
-        """Get detection statistics including tracking info"""
-        if not self.person_detector:
-            return {
-                'person_count': 0,
-                'unique_people': 0,
-                'last_update': 0,
-                'fps': 0,
-                'detections': [],
-                'tracked_person_id': None,
-                'motor_direction': 'stopped',
-                'motor_speed': 0.0,
-                'tracking_enabled': False
-            }
-        
-        # Get base stats from detector
-        stats = self.person_detector.get_detection_stats()
-        
-        # Add YawController specific stats
+    def get_motor_stats(self) -> Dict[str, Any]:
+        """Get motor control statistics"""
         with self.control_lock:
-            stats.update({
-                'unique_people': len(self.unique_people_seen),
+            return {
                 'tracked_person_id': self.tracked_person_id,
                 'motor_direction': self.motor_direction,
                 'motor_speed': self.motor_current_speed,
-                'tracking_enabled': self.tracking_enabled
-            })
-        
-        return stats
-    
-    def get_latest_frame(self):
-        """Get the latest frame from detection system"""
-        if self.person_detector:
-            return self.person_detector.get_latest_frame()
-        return None
-    
-    def is_detection_running(self) -> bool:
-        """Check if detection is running"""
-        if self.person_detector:
-            return self.person_detector.is_running()
-        return False
+                'tracking_enabled': self.tracking_enabled,
+                'motor_enabled': self.motor_enabled
+            }
     
     def is_tracking_enabled(self) -> bool:
         """Check if tracking is enabled"""
         return self.tracking_enabled
     
-    def restart_detection(self) -> bool:
-        """Restart the detection system"""
-        if self.person_detector:
-            return self.person_detector.restart_detection()
-        return False
-    
-    def get_process_info(self) -> Dict:
-        """Get detection process information"""
-        if self.person_detector:
-            return self.person_detector.get_process_info()
-        return {'status': 'not_initialized'}
-    
     def shutdown(self):
         """Shutdown the YawController and cleanup resources"""
         print("YawController: Shutting down...")
         
+        # Unregister from IOController events
+        if self.io_controller:
+            self.io_controller.unregister_event_callback(self._handle_io_event)
+        
         # Stop tracking
         self.stop_tracking()
-        
-        # Stop detection
-        if self.person_detector:
-            self.person_detector.shutdown()
         
         print("YawController: Shutdown complete")
     

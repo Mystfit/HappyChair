@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 
-const CameraPanel = ({ onStatusUpdate }) => {
+const IOPanel = ({ onStatusUpdate }) => {
   const [cameraActive, setCameraActive] = useState(false);
   const [detectionStats, setDetectionStats] = useState({
     person_count: 0,
@@ -12,6 +12,7 @@ const CameraPanel = ({ onStatusUpdate }) => {
     motor_speed: 0.0,
     tracking_enabled: false
   });
+  const [gpioPins, setGpioPins] = useState({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
@@ -29,6 +30,7 @@ const CameraPanel = ({ onStatusUpdate }) => {
       if (data.success) {
         setCameraActive(data.running);
         setDetectionStats(data.stats);
+        setGpioPins(data.gpio_pins || {});
         setError(null);
       } else {
         setError(data.error || 'Failed to fetch camera status');
@@ -110,6 +112,7 @@ const CameraPanel = ({ onStatusUpdate }) => {
           motor_speed: 0.0,
           tracking_enabled: false
         });
+        setGpioPins({});
         if (onStatusUpdate) {
           onStatusUpdate({
             type: 'success',
@@ -153,7 +156,7 @@ const CameraPanel = ({ onStatusUpdate }) => {
   return (
     <div className="camera-panel">
       <div className="panel-header">
-        <h3>Person Detection Camera</h3>
+        <h3>IO Control Panel</h3>
       </div>
       
       <div className="camera-controls">
@@ -194,6 +197,35 @@ const CameraPanel = ({ onStatusUpdate }) => {
               backgroundColor: '#000'
             }}
           />
+        </div>
+        
+        <div className="gpio-status">
+          <h4>GPIO Pin Status</h4>
+          {Object.keys(gpioPins).length > 0 ? (
+            <div className="gpio-pins">
+              {Object.entries(gpioPins).map(([pinNumber, pinInfo]) => (
+                <div key={pinNumber} className="gpio-pin-item">
+                  <div className="pin-info">
+                    <span className="pin-number">Pin {pinNumber}</span>
+                    <span className="pin-name">{pinInfo.name}</span>
+                  </div>
+                  <div className="pin-status">
+                    <div 
+                      className={`status-circle ${pinInfo.state ? 'lit' : 'unlit'}`}
+                      title={`State: ${pinInfo.state ? 'HIGH' : 'LOW'}`}
+                    ></div>
+                    <span className="pin-state">
+                      {pinInfo.state ? 'HIGH' : 'LOW'}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="no-pins">
+              <span>No GPIO pins registered</span>
+            </div>
+          )}
         </div>
         
         <div className="detection-stats">
@@ -251,6 +283,91 @@ const CameraPanel = ({ onStatusUpdate }) => {
 
       <style jsx>{`
         .camera-panel {
+          padding: 20px;
+        }
+        
+        .gpio-status {
+          background-color: #f8f9fa;
+          padding: 15px;
+          border-radius: 8px;
+          border: 1px solid #dee2e6;
+          margin-bottom: 20px;
+        }
+        
+        .gpio-status h4 {
+          margin-bottom: 15px;
+          color: #495057;
+        }
+        
+        .gpio-pins {
+          display: flex;
+          flex-direction: column;
+          gap: 10px;
+        }
+        
+        .gpio-pin-item {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: 12px 15px;
+          background-color: white;
+          border-radius: 5px;
+          border: 1px solid #e9ecef;
+        }
+        
+        .pin-info {
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+        }
+        
+        .pin-number {
+          font-weight: bold;
+          color: #495057;
+          font-size: 14px;
+        }
+        
+        .pin-name {
+          color: #6c757d;
+          font-size: 12px;
+        }
+        
+        .pin-status {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+        
+        .status-circle {
+          width: 16px;
+          height: 16px;
+          border-radius: 50%;
+          border: 2px solid #dee2e6;
+          transition: all 0.3s ease;
+        }
+        
+        .status-circle.lit {
+          background-color: #28a745;
+          border-color: #28a745;
+          box-shadow: 0 0 8px rgba(40, 167, 69, 0.5);
+        }
+        
+        .status-circle.unlit {
+          background-color: #6c757d;
+          border-color: #6c757d;
+        }
+        
+        .pin-state {
+          font-weight: bold;
+          font-size: 12px;
+          color: #495057;
+          min-width: 35px;
+        }
+        
+        .no-pins {
+          text-align: center;
+          color: #6c757d;
+          font-style: italic;
           padding: 20px;
         }
         
@@ -470,4 +587,4 @@ const CameraPanel = ({ onStatusUpdate }) => {
   );
 };
 
-export default CameraPanel;
+export default IOPanel;

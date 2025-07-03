@@ -3,7 +3,7 @@ import TransportPanel from './components/TransportPanel';
 import PowerPanel from './components/PowerPanel';
 import LayersPanel from './components/LayersPanel';
 import PlaylistsPanel from './components/PlaylistsPanel';
-import CameraPanel from './components/CameraPanel';
+import IOPanel from './components/IOPanel';
 import StatusIndicator from './components/StatusIndicator';
 
 function App() {
@@ -262,7 +262,7 @@ function App() {
             className={activeTab === 'camera' ? 'active' : ''} 
             onClick={() => setActiveTab('camera')}
           >
-            Camera
+            IO
           </button>
         </div>
         
@@ -298,7 +298,7 @@ function App() {
           )}
           
           {activeTab === 'camera' && (
-            <CameraPanel 
+            <IOPanel 
               onStatusUpdate={setStatus}
             />
           )}
