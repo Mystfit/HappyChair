@@ -4,9 +4,13 @@ const CameraPanel = ({ onStatusUpdate }) => {
   const [cameraActive, setCameraActive] = useState(false);
   const [detectionStats, setDetectionStats] = useState({
     person_count: 0,
-    total_detections: 0,
+    unique_people: 0,
     fps: 0,
-    last_update: 0
+    last_update: 0,
+    tracked_person_id: null,
+    motor_direction: 'stopped',
+    motor_speed: 0.0,
+    tracking_enabled: false
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -98,9 +102,13 @@ const CameraPanel = ({ onStatusUpdate }) => {
         // Reset stats when camera stops
         setDetectionStats({
           person_count: 0,
-          total_detections: 0,
+          unique_people: 0,
           fps: 0,
-          last_update: 0
+          last_update: 0,
+          tracked_person_id: null,
+          motor_direction: 'stopped',
+          motor_speed: 0.0,
+          tracking_enabled: false
         });
         if (onStatusUpdate) {
           onStatusUpdate({
@@ -196,8 +204,12 @@ const CameraPanel = ({ onStatusUpdate }) => {
               <span className="stat-value">{detectionStats.person_count}</span>
             </div>
             <div className="stat-item">
-              <span className="stat-label">Total Detections:</span>
-              <span className="stat-value">{detectionStats.total_detections}</span>
+              <span className="stat-label">Unique People:</span>
+              <span className="stat-value">{detectionStats.unique_people || 0}</span>
+            </div>
+            <div className="stat-item">
+              <span className="stat-label">Tracking Person ID:</span>
+              <span className="stat-value">{detectionStats.tracked_person_id || 'None'}</span>
             </div>
             <div className="stat-item">
               <span className="stat-label">FPS:</span>
@@ -206,6 +218,32 @@ const CameraPanel = ({ onStatusUpdate }) => {
             <div className="stat-item">
               <span className="stat-label">Last Update:</span>
               <span className="stat-value">{formatLastUpdate(detectionStats.last_update)}</span>
+            </div>
+          </div>
+          
+          <div className="motor-status">
+            <h5>Motor Status</h5>
+            <div className="motor-info">
+              <div className="motor-direction">
+                <span className="motor-label">Direction:</span>
+                <span className={`motor-value direction-${detectionStats.motor_direction}`}>
+                  {detectionStats.motor_direction === 'forward' ? '← Forward' : 
+                   detectionStats.motor_direction === 'reverse' ? 'Reverse →' : 
+                   '● Stopped'}
+                </span>
+              </div>
+              <div className="motor-speed">
+                <span className="motor-label">Speed:</span>
+                <div className="speed-display">
+                  <span className="speed-value">{(detectionStats.motor_speed * 100).toFixed(0)}%</span>
+                  <div className="speed-bar">
+                    <div 
+                      className="speed-fill" 
+                      style={{width: `${detectionStats.motor_speed * 100}%`}}
+                    ></div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -334,6 +372,83 @@ const CameraPanel = ({ onStatusUpdate }) => {
         .stat-value {
           font-weight: bold;
           color: #495057;
+        }
+        
+        .motor-status {
+          margin-top: 20px;
+          padding-top: 15px;
+          border-top: 1px solid #dee2e6;
+        }
+        
+        .motor-status h5 {
+          margin-bottom: 10px;
+          color: #495057;
+          font-size: 16px;
+        }
+        
+        .motor-info {
+          display: flex;
+          flex-direction: column;
+          gap: 10px;
+        }
+        
+        .motor-direction, .motor-speed {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 8px 12px;
+          background-color: white;
+          border-radius: 5px;
+          border: 1px solid #e9ecef;
+        }
+        
+        .motor-label {
+          font-weight: 500;
+          color: #6c757d;
+        }
+        
+        .motor-value {
+          font-weight: bold;
+        }
+        
+        .direction-forward {
+          color: #007bff;
+        }
+        
+        .direction-reverse {
+          color: #fd7e14;
+        }
+        
+        .direction-stopped {
+          color: #6c757d;
+        }
+        
+        .speed-display {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+        }
+        
+        .speed-value {
+          font-weight: bold;
+          color: #495057;
+          min-width: 40px;
+          text-align: right;
+        }
+        
+        .speed-bar {
+          width: 100px;
+          height: 8px;
+          background-color: #e9ecef;
+          border-radius: 4px;
+          overflow: hidden;
+        }
+        
+        .speed-fill {
+          height: 100%;
+          background-color: #28a745;
+          transition: width 0.3s ease;
+          border-radius: 4px;
         }
         
         @media (min-width: 768px) {

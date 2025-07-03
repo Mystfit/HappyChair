@@ -8,7 +8,7 @@ from gevent import pywsgi
 from geventwebsocket.handler import WebSocketHandler
 from Servo.Animation import Animation, AnimationPlayer, AnimationLayer, Playlist
 from pathlib import Path
-from detection_multiprocess import PersonDetectionMultiprocess
+from yaw_controller import YawController
 import cv2
 import numpy as np
 
@@ -22,8 +22,8 @@ playlists = {}
 player = AnimationPlayer()
 
 def shutdown(signum, frame):
-    if person_detector:
-        person_detector.shutdown()
+    if yaw_controller:
+        yaw_controller.shutdown()
     sys.exit()
 
 def get_animation_paths(folder_path):
@@ -75,8 +75,8 @@ CORS(app)  # Enable CORS for all routes
 # Set up socketIO runner for flask app
 sock = Sock(app)
 
-# Initialize person detection
-person_detector = None
+# Initialize YawController
+yaw_controller = None
 
 current_layer = None
 # Load all animations but don't create layers for them
@@ -339,16 +339,17 @@ def api_set_playlist_transport():
 # Camera API Endpoints
 @app.route('/api/camera/start', methods=['POST'])
 def api_start_camera():
-    global person_detector
+    global yaw_controller
     try:
-        if not person_detector:
-            person_detector = PersonDetectionMultiprocess("happychair_detection_buffer")
+        if not yaw_controller:
+            yaw_controller = YawController("happychair_detection_buffer")
+            yaw_controller.start_tracking()
         
-        if person_detector.start_detection():
+        if yaw_controller.start_detection():
             return jsonify({
                 'success': True,
-                'message': 'Camera started successfully (multiprocessing mode)',
-                'process_info': person_detector.get_process_info()
+                'message': 'Camera started successfully (YawController mode)',
+                'process_info': yaw_controller.get_process_info()
             })
         else:
             return jsonify({
@@ -363,9 +364,9 @@ def api_start_camera():
 
 @app.route('/api/camera/stop', methods=['POST'])
 def api_stop_camera():
-    global person_detector
+    global yaw_controller
     try:
-        if person_detector and person_detector.stop_detection():
+        if yaw_controller and yaw_controller.stop_detection():
             return jsonify({
                 'success': True,
                 'message': 'Camera stopped successfully'
@@ -383,13 +384,13 @@ def api_stop_camera():
 
 @app.route('/api/camera/status', methods=['GET'])
 def api_camera_status():
-    global person_detector
+    global yaw_controller
     try:
-        if person_detector:
-            stats = person_detector.get_detection_stats()
+        if yaw_controller:
+            stats = yaw_controller.get_detection_stats()
             return jsonify({
                 'success': True,
-                'running': person_detector.is_running(),
+                'running': yaw_controller.is_detection_running(),
                 'stats': stats
             })
         else:
@@ -398,9 +399,13 @@ def api_camera_status():
                 'running': False,
                 'stats': {
                     'person_count': 0,
-                    'total_detections': 0,
+                    'unique_people': 0,
                     'last_update': 0,
-                    'fps': 0
+                    'fps': 0,
+                    'tracked_person_id': None,
+                    'motor_direction': 'stopped',
+                    'motor_speed': 0.0,
+                    'tracking_enabled': False
                 }
             })
     except Exception as e:
@@ -411,14 +416,14 @@ def api_camera_status():
 
 @app.route('/api/camera/restart', methods=['POST'])
 def api_restart_camera():
-    global person_detector
+    global yaw_controller
     try:
-        if person_detector:
-            if person_detector.restart_detection():
+        if yaw_controller:
+            if yaw_controller.restart_detection():
                 return jsonify({
                     'success': True,
                     'message': 'Camera restarted successfully',
-                    'process_info': person_detector.get_process_info()
+                    'process_info': yaw_controller.get_process_info()
                 })
             else:
                 return jsonify({
@@ -438,13 +443,13 @@ def api_restart_camera():
 
 @app.route('/api/camera/process-info', methods=['GET'])
 def api_camera_process_info():
-    global person_detector
+    global yaw_controller
     try:
-        if person_detector:
+        if yaw_controller:
             return jsonify({
                 'success': True,
-                'process_info': person_detector.get_process_info(),
-                'running': person_detector.is_running()
+                'process_info': yaw_controller.get_process_info(),
+                'running': yaw_controller.is_detection_running()
             })
         else:
             return jsonify({
@@ -460,7 +465,7 @@ def api_camera_process_info():
 
 @app.route('/api/camera/stream')
 def api_camera_stream():
-    global person_detector
+    global yaw_controller
     
     def generate_frames():
         last_frame_time = time.time()
@@ -470,8 +475,8 @@ def api_camera_stream():
             try:
                 current_time = time.time()
                 
-                if person_detector and person_detector.is_running():
-                    frame = person_detector.get_latest_frame()
+                if yaw_controller and yaw_controller.is_detection_running():
+                    frame = yaw_controller.get_latest_frame()
                     if frame is not None:
                         # Encode frame as JPEG with optimized quality
                         encode_params = [
@@ -501,7 +506,7 @@ def api_camera_stream():
                     blank_frame = np.zeros((480, 640, 3), dtype=np.uint8)
                     cv2.putText(blank_frame, "Camera Not Active", (200, 240), 
                               cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
-                    cv2.putText(blank_frame, "Multiprocessing Mode", (180, 280), 
+                    cv2.putText(blank_frame, "YawController Mode", (180, 280), 
                               cv2.FONT_HERSHEY_SIMPLEX, 0.7, (128, 128, 128), 1)
                     
                     _, buffer = cv2.imencode('.jpg', blank_frame)
@@ -521,6 +526,81 @@ def api_camera_stream():
     
     return Response(generate_frames(),
                    mimetype='multipart/x-mixed-replace; boundary=frame')
+
+# Yaw Control API Endpoints
+@app.route('/api/yaw/start-tracking', methods=['POST'])
+def api_start_yaw_tracking():
+    global yaw_controller
+    try:
+        if yaw_controller:
+            if yaw_controller.start_tracking():
+                return jsonify({
+                    'success': True,
+                    'message': 'Yaw tracking started successfully'
+                })
+            else:
+                return jsonify({
+                    'success': False,
+                    'error': 'Failed to start yaw tracking or already running'
+                }), 400
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'YawController not initialized'
+            }), 400
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'Failed to start yaw tracking: {str(e)}'
+        }), 500
+
+@app.route('/api/yaw/stop-tracking', methods=['POST'])
+def api_stop_yaw_tracking():
+    global yaw_controller
+    try:
+        if yaw_controller:
+            yaw_controller.stop_tracking()
+            return jsonify({
+                'success': True,
+                'message': 'Yaw tracking stopped successfully'
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'YawController not initialized'
+            }), 400
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'Failed to stop yaw tracking: {str(e)}'
+        }), 500
+
+@app.route('/api/yaw/status', methods=['GET'])
+def api_yaw_status():
+    global yaw_controller
+    try:
+        if yaw_controller:
+            stats = yaw_controller.get_detection_stats()
+            return jsonify({
+                'success': True,
+                'tracking_enabled': yaw_controller.is_tracking_enabled(),
+                'motor_direction': stats.get('motor_direction', 'stopped'),
+                'motor_speed': stats.get('motor_speed', 0.0),
+                'tracked_person_id': stats.get('tracked_person_id', None)
+            })
+        else:
+            return jsonify({
+                'success': True,
+                'tracking_enabled': False,
+                'motor_direction': 'stopped',
+                'motor_speed': 0.0,
+                'tracked_person_id': None
+            })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'Failed to get yaw status: {str(e)}'
+        }), 500
 
 
 # WebSocket routes
