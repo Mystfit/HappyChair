@@ -273,11 +273,21 @@ class IOController:
         
         # Dispatch detection event if there are detections
         if detections:
-            self.dispatch_event('person_detected', {
+            event_data = {
                 'detections': detections,
                 'person_count': stats.get('person_count', 0),
                 'unique_people': len(self.unique_people_seen)
-            })
+            }
+            
+            # Include movement parameters if available
+            if 'movement_direction' in stats:
+                event_data['movement_direction'] = stats['movement_direction']
+            if 'normalized_speed' in stats:
+                event_data['normalized_speed'] = stats['normalized_speed']
+            if 'tracked_person_id' in stats:
+                event_data['tracked_person_id'] = stats['tracked_person_id']
+            
+            self.dispatch_event('person_detected', event_data)
         
         return stats
     

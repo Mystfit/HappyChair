@@ -227,14 +227,19 @@ class DetectionResultsQueue:
     def __init__(self, queue):
         self.queue = queue
     
-    def put_detection_results(self, person_count: int, detections: list, fps: float):
+    def put_detection_results(self, person_count: int, detections: list, fps: float, 
+                            movement_direction: str = "stopped", normalized_speed: float = 0.0, 
+                            tracked_person_id: int = None):
         """Put detection results in queue"""
         try:
             result = {
                 'timestamp': time.time(),
                 'person_count': person_count,
                 'detections': detections,  # List of {'bbox': (x,y,w,h), 'confidence': float, 'track_id': int}
-                'fps': fps
+                'fps': fps,
+                'movement_direction': movement_direction,  # "left", "right", or "stopped"
+                'normalized_speed': normalized_speed,      # 0.0 to 1.0
+                'tracked_person_id': tracked_person_id     # ID of currently tracked person
             }
             
             # Non-blocking put, drop old results if queue is full

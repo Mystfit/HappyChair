@@ -7,7 +7,7 @@ import threading
 import time
 import math
 from typing import Optional, Dict, Any
-from adafruit_motorkit import MotorKit
+from motor_drivers import MotorDriver, MotorKitDriver, DRV8825Driver, DRV8825DriverPWM
 
 
 class YawController:
@@ -16,18 +16,28 @@ class YawController:
     Subscribes to IOController events for person detection data.
     """
     
-    def __init__(self, io_controller=None):
+    def __init__(self, io_controller=None, motor_type="drv8825_pwm"):
         # IOController reference for event subscription
         self.io_controller = io_controller
         
         # Motor control
-        self.motor_kit = None
+        self.motor_type = motor_type
+        self.motor_driver = None
         self.motor_enabled = False
         
+        # GPIO handle sharing (for DRV8825 compatibility with IOController)
+        self.gpio_handle = None
+        if self.io_controller and hasattr(self.io_controller, 'gpio_handle'):
+            self.gpio_handle = self.io_controller.gpio_handle
+        
         # Person tracking
-        self.tracked_person_id = None
         self.tracking_enabled = False
         self.latest_detections = []
+        
+        # Movement parameters (received from DetectionProcess)
+        self.movement_direction = "stopped"
+        self.normalized_speed = 0.0
+        self.tracked_person_id = None
         
         # Camera and control parameters
         self.camera_width = 1280  # From shared_memory_manager.py
@@ -59,9 +69,12 @@ class YawController:
         data = event.get('data', {})
         
         if event_type == 'person_detected':
-            # Update latest detections for motor control
+            # Update movement parameters from DetectionProcess
             with self.control_lock:
                 self.latest_detections = data.get('detections', [])
+                self.movement_direction = data.get('movement_direction', 'stopped')
+                self.normalized_speed = data.get('normalized_speed', 0.0)
+                self.tracked_person_id = data.get('tracked_person_id', None)
         elif event_type == 'pin_changed':
             # Handle GPIO pin changes if needed for future logic
             pin = data.get('pin')
@@ -71,12 +84,28 @@ class YawController:
     def start_motor_control(self) -> bool:
         """Initialize and start motor control"""
         try:
-            if not self.motor_kit:
-                self.motor_kit = MotorKit()
-                print("YawController: Motor kit initialized")
+            if not self.motor_driver:
+                # Create the appropriate motor driver based on motor_type
+                if self.motor_type == "motorkit":
+                    self.motor_driver = MotorKitDriver()
+                elif self.motor_type == "drv8825":
+                    self.motor_driver = DRV8825Driver(gpio_handle=self.gpio_handle)
+                elif self.motor_type == "drv8825_pwm":
+                    self.motor_driver = DRV8825DriverPWM(gpio_handle=self.gpio_handle)
+                else:
+                    print(f"YawController: Unknown motor type: {self.motor_type}")
+                    return False
+                
+                print(f"YawController: Created {self.motor_type} driver")
             
-            self.motor_enabled = True
-            return True
+            # Start the motor driver
+            if self.motor_driver.start():
+                self.motor_enabled = True
+                print("YawController: Motor control started")
+                return True
+            else:
+                print("YawController: Failed to start motor driver")
+                return False
             
         except Exception as e:
             print(f"YawController: Error initializing motor: {e}")
@@ -85,9 +114,9 @@ class YawController:
     def stop_motor_control(self):
         """Stop motor control and ensure motor is stopped"""
         self.motor_enabled = False
-        if self.motor_kit:
+        if self.motor_driver:
             try:
-                self.motor_kit.motor1.throttle = 0
+                self.motor_driver.stop()
                 self.motor_current_speed = 0.0
                 self.motor_direction = "stopped"
                 print("YawController: Motor stopped")
@@ -149,26 +178,17 @@ class YawController:
                     time.sleep(0.1)
                     continue
                 
-                # Get latest detection results from IOController events
+                # Get movement parameters from DetectionProcess via IOController events
                 with self.control_lock:
-                    detections = self.latest_detections.copy()
+                    movement_direction = self.movement_direction
+                    normalized_speed = self.normalized_speed
+                    tracked_person_id = self.tracked_person_id
                 
-                if not detections:
-                    time.sleep(0.1)
-                    continue
-                
-                # Find person to track
-                target_detection = self._find_target_person(detections)
-                
-                if target_detection:
-                    # Calculate motor control
-                    self._update_motor_control(target_detection)
-                else:
-                    # No target found, stop motor
-                    self._stop_motor()
+                # Apply motor control based on movement parameters
+                self._update_motor_control_from_parameters(movement_direction, normalized_speed, tracked_person_id)
                 
                 # Control loop frequency (10 Hz)
-                time.sleep(0.1)
+                time.sleep(0.2)
                 
             except Exception as e:
                 print(f"YawController: Error in control loop: {e}")
@@ -178,87 +198,38 @@ class YawController:
         self._stop_motor()
         print("YawController: Control loop stopped")
     
-    def _find_target_person(self, detections: list) -> Optional[Dict]:
-        """Find the person to track based on tracking logic"""
-        if not detections:
-            return None
-        
-        # If we have a tracked person, try to find them
-        if self.tracked_person_id is not None:
-            for detection in detections:
-                if detection.get('track_id') == self.tracked_person_id:
-                    return detection
-            
-            # Tracked person not found, reset tracking
-            print(f"YawController: Lost track of person {self.tracked_person_id}")
-            self.tracked_person_id = None
-        
-        # No tracked person or lost track, find first available person
-        for detection in detections:
-            track_id = detection.get('track_id', 0)
-            if track_id > 0:
-                self.tracked_person_id = track_id
-                print(f"YawController: Now tracking person {track_id}")
-                return detection
-        
-        return None
-    
-    def _update_motor_control(self, detection: Dict):
-        """Update motor control based on person's position"""
-        bbox = detection.get('bbox', (0, 0, 0, 0))
-        x, y, w, h = bbox
-        x *= 1280  # Scale bounding box x position to camera width
-        y *= 720   # Scale bounding box y position to camera height
-        w *= 1280  # Scale bounding box width to camera width
-        h *= 720   # Scale bounding box height to camera height
-
-        # Calculate person's center X position
-        person_center_x = x + (w / 2)
-        
-        # Calculate distance from camera center
-        distance_from_center = person_center_x - self.center_x
-        
+    def _update_motor_control_from_parameters(self, movement_direction: str, normalized_speed: float, tracked_person_id: int):
+        """Update motor control based on movement parameters from DetectionProcess"""
         with self.control_lock:
-            # Check if person is in dead zone
-            if abs(distance_from_center) <= self.dead_zone_half:
-                # Person is in dead zone, stop motor
+            if movement_direction == "stopped" or normalized_speed <= 0:
+                # No movement required, stop motor
                 self._stop_motor()
                 return
             
-            print(f"Bounding box: {bbox}, Tracking ID: {detection.get('track_id', 'N/A')}, Person Center X: {person_center_x}")
+            # Convert normalized speed to motor speed
+            motor_speed = self._convert_normalized_to_motor_speed(normalized_speed)
             
-            # Calculate motor speed based on distance from dead zone edge
-            if distance_from_center < -self.dead_zone_half:
+            if movement_direction == "left":
                 # Person is on the left, motor should go forward
-                distance_from_dead_zone = abs(distance_from_center) - self.dead_zone_half
-                max_distance = self.center_x - self.dead_zone_half
-                speed = self._calculate_motor_speed(distance_from_dead_zone, max_distance)
-                print(f"Person on left, speed: {speed}")
-                self._set_motor_forward(speed)
+                # print(f"YawController: Person {tracked_person_id} on left, motor forward at speed: {motor_speed:.2f}")
+                self._set_motor_forward(motor_speed)
                 
-            elif distance_from_center > self.dead_zone_half:
+            elif movement_direction == "right":
                 # Person is on the right, motor should go reverse
-                distance_from_dead_zone = distance_from_center - self.dead_zone_half
-                max_distance = self.center_x - self.dead_zone_half
-                speed = self._calculate_motor_speed(distance_from_dead_zone, max_distance)
-                print(f"Person on right, speed: {speed}")
-                self._set_motor_reverse(speed)
+                # print(f"YawController: Person {tracked_person_id} on right, motor reverse at speed: {motor_speed:.2f}")
+                self._set_motor_reverse(motor_speed)
     
-    def _calculate_motor_speed(self, distance_from_dead_zone: float, max_distance: float) -> float:
-        """Calculate motor speed based on distance from dead zone"""
-        # Normalize distance (0.0 to 1.0)
-        normalized_distance = min(distance_from_dead_zone / max_distance, 1.0)
-        
+    def _convert_normalized_to_motor_speed(self, normalized_speed: float) -> float:
+        """Convert normalized speed (0.0-1.0) to motor speed with min/max scaling"""
         # Apply speed scaling (min to max speed)
-        speed = self.min_motor_speed + (normalized_distance * (self.max_motor_speed - self.min_motor_speed))
-        
-        return min(speed, self.max_motor_speed)
+        motor_speed = self.min_motor_speed + (normalized_speed * (self.max_motor_speed - self.min_motor_speed))
+        return min(motor_speed, self.max_motor_speed)
     
     def _set_motor_forward(self, speed: float):
         """Set motor to move forward at specified speed"""
-        if self.motor_kit and self.motor_enabled:
+        if self.motor_driver and self.motor_enabled:
             try:
-                self.motor_kit.motor1.throttle = speed
+                self.motor_driver.set_speed("forward", speed)
                 self.motor_current_speed = speed
                 self.motor_direction = "forward"
             except Exception as e:
@@ -266,9 +237,9 @@ class YawController:
     
     def _set_motor_reverse(self, speed: float):
         """Set motor to move reverse at specified speed"""
-        if self.motor_kit and self.motor_enabled:
+        if self.motor_driver and self.motor_enabled:
             try:
-                self.motor_kit.motor1.throttle = -speed
+                self.motor_driver.set_speed("reverse", speed)
                 self.motor_current_speed = speed
                 self.motor_direction = "reverse"
             except Exception as e:
@@ -276,9 +247,9 @@ class YawController:
     
     def _stop_motor(self):
         """Stop the motor"""
-        if self.motor_kit and self.motor_enabled:
+        if self.motor_driver and self.motor_enabled:
             try:
-                self.motor_kit.motor1.throttle = 0
+                self.motor_driver.set_speed("stopped", 0.0)
                 self.motor_current_speed = 0.0
                 self.motor_direction = "stopped"
             except Exception as e:
@@ -287,13 +258,21 @@ class YawController:
     def get_motor_stats(self) -> Dict[str, Any]:
         """Get motor control statistics"""
         with self.control_lock:
-            return {
+            stats = {
                 'tracked_person_id': self.tracked_person_id,
                 'motor_direction': self.motor_direction,
                 'motor_speed': self.motor_current_speed,
                 'tracking_enabled': self.tracking_enabled,
-                'motor_enabled': self.motor_enabled
+                'motor_enabled': self.motor_enabled,
+                'motor_type': self.motor_type
             }
+            
+            # Add driver-specific stats if available
+            if self.motor_driver:
+                driver_stats = self.motor_driver.get_stats()
+                stats.update({f'driver_{k}': v for k, v in driver_stats.items()})
+            
+            return stats
     
     def is_tracking_enabled(self) -> bool:
         """Check if tracking is enabled"""

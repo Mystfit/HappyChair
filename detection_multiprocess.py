@@ -198,6 +198,14 @@ class PersonDetectionMultiprocess:
                 'fps': latest_results['fps'],
                 'detections': latest_results['detections']
             })
+            
+            # Include movement parameters if available
+            if 'movement_direction' in latest_results:
+                self.detection_stats['movement_direction'] = latest_results['movement_direction']
+            if 'normalized_speed' in latest_results:
+                self.detection_stats['normalized_speed'] = latest_results['normalized_speed']
+            if 'tracked_person_id' in latest_results:
+                self.detection_stats['tracked_person_id'] = latest_results['tracked_person_id']
     
     def is_running(self) -> bool:
         """Check if detection is currently running"""

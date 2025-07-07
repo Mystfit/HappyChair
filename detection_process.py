@@ -138,6 +138,28 @@ class DetectionCallbackHandler(app_callback_class):
         self.results_queue = DetectionResultsQueue(results_queue)
         self.use_frame = True
         
+        # Camera and control parameters
+        self.camera_width = 1280
+        self.camera_height = 720
+        self.center_x = self.camera_width // 2  # 640px
+        self.dead_zone_width = 400  # 400px total dead zone
+        self.dead_zone_half = self.dead_zone_width // 2  # ±200px from center
+        self.screen_margin = 100  # 100px margin on each side
+        
+        # Person tracking (moved from YawController)
+        self.tracked_person_id = None
+        
+        # Visual debugging colors (BGR format for OpenCV)
+        self.left_movement_color = (0, 255, 255)  # Yellow in BGR
+        self.right_movement_color = (0, 165, 255)  # Orange in BGR
+        self.tracked_person_color = (255, 255, 0)  # Cyan in BGR
+        self.overlay_opacity = 0.25
+        self.speed_bar_height = 40
+        
+        # Movement control parameters
+        self.max_speed = 1.0
+        self.min_speed = 0.1
+        
         # Performance tracking
         self.frame_times = []
         self.last_stats_time = time.time()
@@ -160,6 +182,139 @@ class DetectionCallbackHandler(app_callback_class):
             fps = 0
             
         return fps
+    
+    def _find_target_person(self, detections):
+        """Find the person to track based on tracking logic"""
+        if not detections:
+            return None
+        
+        # If we have a tracked person, try to find them
+        if self.tracked_person_id is not None:
+            for detection in detections:
+                if detection.get('track_id') == self.tracked_person_id:
+                    return detection
+            
+            # Tracked person not found, reset tracking
+            print(f"DetectionProcess: Lost track of person {self.tracked_person_id}")
+            self.tracked_person_id = None
+        
+        # No tracked person or lost track, find first available person
+        for detection in detections:
+            track_id = detection.get('track_id', 0)
+            if track_id > 0:
+                self.tracked_person_id = track_id
+                print(f"DetectionProcess: Now tracking person {track_id}")
+                return detection
+        
+        return None
+    
+    def _calculate_movement_parameters(self, detection):
+        """Calculate movement direction and normalized speed for a person"""
+        bbox = detection.get('bbox', (0, 0, 0, 0))
+        x, y, w, h = bbox
+        x *= self.camera_width  # Scale bounding box x position to camera width
+        y *= self.camera_height   # Scale bounding box y position to camera height
+        w *= self.camera_width  # Scale bounding box width to camera width
+        h *= self.camera_height   # Scale bounding box height to camera height
+
+        # Calculate person's center X position
+        person_center_x = x + (w / 2)
+        
+        # Calculate distance from camera center
+        distance_from_center = person_center_x - self.center_x
+        
+        # Check if person is in dead zone
+        if abs(distance_from_center) <= self.dead_zone_half:
+            # Person is in dead zone, no movement
+            return "stopped", 0.0
+        
+        # Calculate movement speed based on distance from dead zone edge
+        if distance_from_center < -self.dead_zone_half:
+            # Person is on the left, should move left
+            distance_from_dead_zone = abs(distance_from_center) - self.dead_zone_half
+            # Apply screen margin to reduce max distance
+            max_distance = (self.center_x - self.dead_zone_half) - self.screen_margin
+            speed = self._calculate_normalized_speed(distance_from_dead_zone, max_distance)
+            return "left", speed
+            
+        elif distance_from_center > self.dead_zone_half:
+            # Person is on the right, should move right
+            distance_from_dead_zone = distance_from_center - self.dead_zone_half
+            # Apply screen margin to reduce max distance
+            max_distance = (self.center_x - self.dead_zone_half) - self.screen_margin
+            speed = self._calculate_normalized_speed(distance_from_dead_zone, max_distance)
+            return "right", speed
+        
+        return "stopped", 0.0
+    
+    def _calculate_normalized_speed(self, distance_from_dead_zone, max_distance):
+        """Calculate normalized speed based on distance from dead zone"""
+        if max_distance <= 0:
+            return self.max_speed
+        
+        # Normalize distance (0.0 to 1.0)
+        normalized_distance = min(distance_from_dead_zone / max_distance, 1.0)
+        
+        # Apply speed scaling (min to max speed)
+        speed = self.min_speed + (normalized_distance * (self.max_speed - self.min_speed))
+        
+        return min(speed, self.max_speed)
+    
+    def _draw_direction_indicator(self, frame, direction):
+        """Draw semi-transparent rectangle for movement direction"""
+        if direction == "stopped":
+            return
+        
+        height, width = frame.shape[:2]
+        overlay = frame.copy()
+        
+        if direction == "left":
+            # Yellow overlay on left half
+            cv2.rectangle(overlay, (0, 0), (width // 2, height), self.left_movement_color, -1)
+        elif direction == "right":
+            # Orange overlay on right half
+            cv2.rectangle(overlay, (width // 2, 0), (width, height), self.right_movement_color, -1)
+        
+        # Blend with original frame
+        cv2.addWeighted(overlay, self.overlay_opacity, frame, 1 - self.overlay_opacity, 0, frame)
+    
+    def _draw_speed_indicator(self, frame, direction, normalized_speed):
+        """Draw speed indicator bar at bottom of frame"""
+        if direction == "stopped" or normalized_speed <= 0:
+            return
+        
+        height, width = frame.shape[:2]
+        
+        # Calculate bar dimensions
+        bar_y = height - self.speed_bar_height - 10  # 10px from bottom
+        bar_height = self.speed_bar_height
+        
+        # Calculate dead zone boundaries
+        dead_zone_left = self.center_x - self.dead_zone_half
+        dead_zone_right = self.center_x + self.dead_zone_half
+        
+        # Calculate active area boundaries (with margins)
+        active_left = self.screen_margin
+        active_right = width - self.screen_margin
+        
+        if direction == "left":
+            # Bar starts from left edge of dead zone and extends left
+            bar_right = dead_zone_left
+            bar_width = int((dead_zone_left - active_left) * normalized_speed)
+            bar_left = bar_right - bar_width
+            color = self.left_movement_color
+        else:  # direction == "right"
+            # Bar starts from right edge of dead zone and extends right
+            bar_left = dead_zone_right
+            bar_width = int((active_right - dead_zone_right) * normalized_speed)
+            bar_right = bar_left + bar_width
+            color = self.right_movement_color
+        
+        # Draw the speed bar
+        cv2.rectangle(frame, (bar_left, bar_y), (bar_right, bar_y + bar_height), color, -1)
+        
+        # Draw border around the bar
+        cv2.rectangle(frame, (bar_left, bar_y), (bar_right, bar_y + bar_height), (255, 255, 255), 2)
 
 
 def detection_callback(pad, info, user_data):
@@ -212,33 +367,74 @@ def detection_callback(pad, info, user_data):
                 'track_id': track_id
             }
             detection_list.append(detection_info)
+    
+    # Find target person to track
+    target_person = user_data._find_target_person(detection_list)
+    
+    # Calculate movement parameters for tracked person
+    movement_direction = "stopped"
+    normalized_speed = 0.0
+    
+    if target_person:
+        movement_direction, normalized_speed = user_data._calculate_movement_parameters(target_person)
+    
+    # Draw bounding boxes and visual debugging on frame
+    if frame is not None:
+        # Draw direction indicator (semi-transparent overlay)
+        user_data._draw_direction_indicator(frame, movement_direction)
+        
+        # Draw all person bounding boxes
+        for detection_info in detection_list:
+            bbox = detection_info['bbox']
+            track_id = detection_info['track_id']
+            confidence = detection_info['confidence']
             
-            # Draw bounding box on frame if available
-            if frame is not None:
-                # Convert normalized coordinates to pixel coordinates
-                x_min = int(bbox.xmin() * width)
-                y_min = int(bbox.ymin() * height)
-                x_max = int(bbox.xmax() * width)
-                y_max = int(bbox.ymax() * height)
-                
-                # Draw bounding box
-                cv2.rectangle(frame, (x_min, y_min), (x_max, y_max), (0, 255, 0), 2)
-                
-                # Draw label and confidence
+            # Convert normalized coordinates to pixel coordinates
+            x = int(bbox[0] * width)
+            y = int(bbox[1] * height)
+            w = int(bbox[2] * width)
+            h = int(bbox[3] * height)
+            
+            x_min, y_min = x, y
+            x_max, y_max = x + w, y + h
+            
+            # Choose color based on whether this is the tracked person
+            if target_person and track_id == target_person.get('track_id'):
+                # Tracked person gets cyan color
+                box_color = user_data.tracked_person_color
+                label_text = f"TRACKED Person {track_id}: {confidence:.2f}"
+            else:
+                # Other persons get green color
+                box_color = (0, 255, 0)
                 label_text = f"Person {track_id}: {confidence:.2f}"
-                cv2.putText(frame, label_text, (x_min, y_min - 10), 
-                          cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+            
+            # Draw bounding box
+            cv2.rectangle(frame, (x_min, y_min), (x_max, y_max), box_color, 2)
+            
+            # Draw label and confidence
+            cv2.putText(frame, label_text, (x_min, y_min - 10), 
+                      cv2.FONT_HERSHEY_SIMPLEX, 0.5, box_color, 1)
+        
+        # Draw speed indicator bar
+        user_data._draw_speed_indicator(frame, movement_direction, normalized_speed)
     
     # Update FPS statistics
     fps = user_data.update_fps_stats()
     
     # Process frame for shared memory
     if frame is not None:
-        # Add overlays
+        # Add text overlays
         cv2.putText(frame, f"Persons: {person_count}", (10, 30), 
                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
         cv2.putText(frame, f"FPS: {fps:.1f}", (10, 70), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+        
+        # Add tracking info
+        if target_person:
+            tracking_text = f"Tracking: {user_data.tracked_person_id} | Dir: {movement_direction} | Speed: {normalized_speed:.2f}"
+            cv2.putText(frame, tracking_text, (10, 110), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
+        
         cv2.putText(frame, "Detection Process", (10, height - 20), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
         
@@ -248,13 +444,21 @@ def detection_callback(pad, info, user_data):
         # Write frame to shared memory
         user_data.shared_buffer.write_frame(frame_bgr)
     
-    # Send detection results
-    user_data.results_queue.put_detection_results(person_count, detection_list, fps)
+    # Send detection results with movement parameters
+    user_data.results_queue.put_detection_results(
+        person_count, 
+        detection_list, 
+        fps,
+        movement_direction=movement_direction,
+        normalized_speed=normalized_speed,
+        tracked_person_id=user_data.tracked_person_id
+    )
     
     # Periodic stats reporting
     current_time = time.time()
     if current_time - user_data.last_stats_time > user_data.stats_interval:
-        print(f"Detection Process - Frame: {user_data.get_count()}, Persons: {person_count}, FPS: {fps:.1f}")
+        tracking_info = f", Tracking: {user_data.tracked_person_id}, Dir: {movement_direction}, Speed: {normalized_speed:.2f}" if target_person else ""
+        print(f"Detection Process - Frame: {user_data.get_count()}, Persons: {person_count}, FPS: {fps:.1f}{tracking_info}")
         user_data.last_stats_time = current_time
     
     return Gst.PadProbeReturn.OK

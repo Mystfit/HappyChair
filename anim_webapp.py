@@ -349,7 +349,7 @@ def api_start_camera():
     global io_controller, yaw_controller
     try:
         if not yaw_controller:
-            yaw_controller = YawController(io_controller)
+            yaw_controller = YawController(io_controller, motor_type="drv8825_pwm")
             yaw_controller.start_tracking()
         
         if io_controller.start_detection():
