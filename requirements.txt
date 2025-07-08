@@ -126,6 +126,7 @@ responses==0.18.0
 rfc3987==1.3.8
 roman==3.3
 RPi.GPIO==0.7.1
+rpi_hardware_pwm==0.3.0
 rpi_ws281x==5.0.0
 RTIMULib==7.2.1
 Send2Trash==1.8.1b0
