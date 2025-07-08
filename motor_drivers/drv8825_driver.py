@@ -78,6 +78,9 @@ class DRV8825Driver(MotorDriver):
         """
         print("DRV8825Driver: Stopping motor...")
         
+        # Stop any active transitions
+        self.stop_transitions()
+        
         # Stop stepping thread
         self.step_thread_running = False
         
@@ -102,9 +105,11 @@ class DRV8825Driver(MotorDriver):
         self.current_speed = 0.0
         self.current_direction = "stopped"
     
-    def set_speed(self, direction: str, speed: float):
+    # set_speed is now inherited from base class
+    
+    def _set_speed_immediate(self, direction: str, speed: float):
         """
-        Set motor direction and speed.
+        Set motor direction and speed immediately (internal method).
         
         Args:
             direction (str): "forward", "reverse", or "stopped"

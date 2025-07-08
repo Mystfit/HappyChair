@@ -34,13 +34,13 @@ class DRV8825DriverPWM(MotorDriver):
         # Speed mapping parameters - converted to frequency ranges
         # Start with much slower frequencies to ensure motor can step properly
         # Based on original driver default of 0.005s step_delay = 100Hz total frequency
-        self.min_frequency = 50   # Very slow: 10Hz (100ms period)
-        self.max_frequency = 500  # Moderate: 100Hz (10ms period, matches original default)
+        self.min_frequency = 100   # Very slow: 10Hz (100ms period)
+        self.max_frequency = 1000  # Moderate: 100Hz (10ms period, matches original default)
         self.current_frequency = 0
         
         # Limit speed changes to avoid abrupt stepper movements
         self.speed_change_threshold = 0.1  # Minimum speed change to trigger update
-        self.limit_speed_updates = True
+        self.limit_speed_updates = False
         
         # Target state for PWM control
         self.target_direction = "stopped"
@@ -105,6 +105,9 @@ class DRV8825DriverPWM(MotorDriver):
         """
         print("DRV8825DriverPWM: Stopping motor...")
         
+        # Stop any active transitions
+        self.stop_transitions()
+        
         # Stop PWM and disable motor
         self._stop_pwm()
         
@@ -128,9 +131,11 @@ class DRV8825DriverPWM(MotorDriver):
         self.current_direction = "stopped"
         print("DRV8825DriverPWM: Motor stopped")
     
-    def set_speed(self, direction: str, speed: float):
+    # set_speed is now inherited from base class
+    
+    def _set_speed_immediate(self, direction: str, speed: float):
         """
-        Set motor direction and speed using hardware PWM.
+        Set motor direction and speed immediately using hardware PWM (internal method).
         
         Args:
             direction (str): "forward", "reverse", or "stopped"
@@ -142,14 +147,15 @@ class DRV8825DriverPWM(MotorDriver):
         # Clamp speed to valid range
         speed = max(0.0, min(1.0, speed))
         
+        # Check if we should update speed (compare against current speed, not target speed)
         update_speed = not self.limit_speed_updates
-        if update_speed and speed >= self.target_speed + self.speed_change_threshold or speed <= self.target_speed - self.speed_change_threshold:
-            update_speed = True
+        if self.limit_speed_updates:
+            speed_diff = abs(speed - self.current_speed)
+            update_speed = speed_diff >= self.speed_change_threshold
                 
         if update_speed:
             with self.control_lock:
-                self.target_direction = direction
-                self.target_speed = speed
+                frequency = 0
                 
                 if direction == "stopped" or speed <= 0:
                     self._stop_pwm()
@@ -171,7 +177,7 @@ class DRV8825DriverPWM(MotorDriver):
                     # Start/update PWM
                     self._start_pwm(frequency)
                 
-                # Update current state
+                # Update current state (base class manages target state)
                 self.current_speed = speed
                 self.current_direction = direction
                 
@@ -191,12 +197,12 @@ class DRV8825DriverPWM(MotorDriver):
                 self.hardware_pwm.change_frequency(frequency)
             else:
                 # Start new hardware PWM
+                print(f"DRV8825DriverPWM: Hardware PWM started at {frequency:.1f}Hz, {self.pwm_duty_cycle}% duty cycle")
                 self.hardware_pwm.start(self.pwm_duty_cycle)
                 self.hardware_pwm.change_frequency(frequency)
                 self.pwm_active = True
                 
             self.pwm_frequency = frequency
-            print(f"DRV8825DriverPWM: Hardware PWM started at {frequency:.1f}Hz, {self.pwm_duty_cycle}% duty cycle")
             
         except Exception as e:
             print(f"DRV8825DriverPWM: Error starting hardware PWM: {e}")

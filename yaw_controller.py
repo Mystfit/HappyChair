@@ -52,6 +52,11 @@ class YawController:
         self.motor_current_speed = 0.0
         self.motor_direction = "stopped"  # "forward", "reverse", "stopped"
         
+        # State tracking to prevent redundant commands
+        self.last_motor_direction = "stopped"
+        self.last_motor_speed = 0.0
+        self.command_change_threshold = 0.01  # Minimum speed change to trigger new command
+        
         # Threading
         self.control_thread = None
         self.control_thread_running = False
@@ -201,23 +206,40 @@ class YawController:
     def _update_motor_control_from_parameters(self, movement_direction: str, normalized_speed: float, tracked_person_id: int):
         """Update motor control based on movement parameters from DetectionProcess"""
         with self.control_lock:
+            # Calculate target motor state
             if movement_direction == "stopped" or normalized_speed <= 0:
-                # No movement required, stop motor
-                self._stop_motor()
-                return
-            
-            # Convert normalized speed to motor speed
-            motor_speed = self._convert_normalized_to_motor_speed(normalized_speed)
-            
-            if movement_direction == "left":
-                # Person is on the left, motor should go forward
-                # print(f"YawController: Person {tracked_person_id} on left, motor forward at speed: {motor_speed:.2f}")
-                self._set_motor_forward(motor_speed)
+                target_direction = "stopped"
+                target_speed = 0.0
+            else:
+                # Convert normalized speed to motor speed
+                target_speed = self._convert_normalized_to_motor_speed(normalized_speed)
                 
-            elif movement_direction == "right":
-                # Person is on the right, motor should go reverse
-                # print(f"YawController: Person {tracked_person_id} on right, motor reverse at speed: {motor_speed:.2f}")
-                self._set_motor_reverse(motor_speed)
+                if movement_direction == "left":
+                    # Person is on the left, motor should go forward
+                    target_direction = "forward"
+                elif movement_direction == "right":
+                    # Person is on the right, motor should go reverse
+                    target_direction = "reverse"
+                else:
+                    target_direction = "stopped"
+                    target_speed = 0.0
+            
+            # Only send command if target has changed significantly
+            direction_changed = target_direction != self.last_motor_direction
+            speed_changed = abs(target_speed - self.last_motor_speed) > self.command_change_threshold
+            
+            if direction_changed or speed_changed:
+                # Send new motor command
+                if target_direction == "stopped":
+                    print(f"YawController: Stopping motor (was {self.last_motor_direction}@{self.last_motor_speed:.3f})")
+                    self._send_motor_command(target_direction, target_speed, duration=1.0, divisions=2)
+                else:
+                    print(f"YawController: Person {tracked_person_id} {movement_direction}, motor {target_direction} at speed {target_speed:.3f} (was {self.last_motor_direction}@{self.last_motor_speed:.3f})")
+                    self._send_motor_command(target_direction, target_speed, duration=5.0, divisions=2)
+                
+                # Update state tracking
+                self.last_motor_direction = target_direction
+                self.last_motor_speed = target_speed
     
     def _convert_normalized_to_motor_speed(self, normalized_speed: float) -> float:
         """Convert normalized speed (0.0-1.0) to motor speed with min/max scaling"""
@@ -225,33 +247,35 @@ class YawController:
         motor_speed = self.min_motor_speed + (normalized_speed * (self.max_motor_speed - self.min_motor_speed))
         return min(motor_speed, self.max_motor_speed)
     
-    def _set_motor_forward(self, speed: float):
-        """Set motor to move forward at specified speed"""
+    def _send_motor_command(self, direction: str, speed: float, duration: float = 3.0, divisions: int = 5):
+        """Send motor command with specified parameters"""
         if self.motor_driver and self.motor_enabled:
             try:
-                self.motor_driver.set_speed("forward", speed)
+                self.motor_driver.set_speed(direction, speed, duration=duration, divisions=divisions)
                 self.motor_current_speed = speed
-                self.motor_direction = "forward"
+                self.motor_direction = direction
             except Exception as e:
-                print(f"YawController: Error setting motor forward: {e}")
+                print(f"YawController: Error sending motor command {direction}@{speed:.3f}: {e}")
+    
+    def _set_motor_forward(self, speed: float):
+        """Set motor to move forward at specified speed (legacy method)"""
+        self._send_motor_command("forward", speed, duration=3.0, divisions=5)
     
     def _set_motor_reverse(self, speed: float):
-        """Set motor to move reverse at specified speed"""
-        if self.motor_driver and self.motor_enabled:
-            try:
-                self.motor_driver.set_speed("reverse", speed)
-                self.motor_current_speed = speed
-                self.motor_direction = "reverse"
-            except Exception as e:
-                print(f"YawController: Error setting motor reverse: {e}")
+        """Set motor to move reverse at specified speed (legacy method)"""
+        self._send_motor_command("reverse", speed, duration=3.0, divisions=5)
     
     def _stop_motor(self):
-        """Stop the motor"""
+        """Stop the motor (legacy method - used when control loop exits)"""
         if self.motor_driver and self.motor_enabled:
             try:
-                self.motor_driver.set_speed("stopped", 0.0)
+                # Use smooth transition to stop
+                self.motor_driver.set_speed("stopped", 0.0, duration=1.0, divisions=5)
                 self.motor_current_speed = 0.0
                 self.motor_direction = "stopped"
+                # Update state tracking
+                self.last_motor_direction = "stopped"
+                self.last_motor_speed = 0.0
             except Exception as e:
                 print(f"YawController: Error stopping motor: {e}")
     

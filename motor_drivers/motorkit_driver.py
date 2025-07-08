@@ -3,6 +3,7 @@ MotorKit driver implementation for Adafruit MotorKit.
 Wraps the existing adafruit_motorkit functionality.
 """
 
+import threading
 from .base_driver import MotorDriver
 from adafruit_motorkit import MotorKit
 
@@ -40,6 +41,9 @@ class MotorKitDriver(MotorDriver):
         """
         Stop the motor and cleanup resources.
         """
+        # Stop any active transitions
+        self.stop_transitions()
+        
         self.enabled = False
         if self.motor_kit:
             try:
@@ -50,9 +54,11 @@ class MotorKitDriver(MotorDriver):
             except Exception as e:
                 print(f"MotorKitDriver: Error stopping motor: {e}")
     
-    def set_speed(self, direction: str, speed: float):
+    # set_speed is now inherited from base class
+    
+    def _set_speed_immediate(self, direction: str, speed: float):
         """
-        Set motor direction and speed.
+        Set motor direction and speed immediately (internal method).
         
         Args:
             direction (str): "forward", "reverse", or "stopped"

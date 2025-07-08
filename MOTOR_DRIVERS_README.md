@@ -65,9 +65,10 @@ yaw_controller.start_tracking()
 - **Hardware**: Adafruit MotorKit
 - **Control**: Continuous throttle control (-1.0 to 1.0)
 - **Features**: 
-  - Immediate speed changes
+  - Immediate and smooth speed changes
   - Bidirectional control
   - Variable speed control
+  - Smooth speed transitions with configurable duration and divisions
 
 ### DRV8825Driver
 
@@ -84,6 +85,24 @@ yaw_controller.start_tracking()
   - Speed control via step delay timing
   - Fullstep mode operation
   - Thread-safe operation
+  - Smooth speed transitions with linear interpolation
+
+### DRV8825DriverPWM
+
+- **Type**: Stepper Motor Controller (Hardware PWM)
+- **Hardware**: DRV8825 stepper driver board with hardware PWM
+- **Control**: Hardware-timed PWM for precise stepping
+- **GPIO Pins**:
+  - Direction: GPIO 24
+  - Step: GPIO 18 or 19 (hardware PWM pins only)
+  - Enable: GPIO 4
+  - Mode: GPIO 21, 22, 27
+- **Features**:
+  - Hardware PWM for consistent timing
+  - Eliminates GIL-related timing issues
+  - Frequency-based speed control
+  - Thread-safe operation
+  - Smooth speed transitions with linear interpolation
 
 #### DRV8825 Speed Mapping
 
@@ -119,8 +138,8 @@ class MotorDriver(ABC):
     def stop(self):
         """Stop the motor and cleanup resources"""
         
-    def set_speed(self, direction: str, speed: float):
-        """Set motor direction and speed"""
+    def set_speed(self, direction: str, speed: float, duration: float = 0.0, divisions: int = 10):
+        """Set motor direction and speed with optional smooth transitions"""
         
     def is_enabled(self) -> bool:
         """Check if the motor driver is enabled"""
@@ -128,6 +147,38 @@ class MotorDriver(ABC):
     def get_stats(self) -> Dict[str, Any]:
         """Get current motor statistics"""
 ```
+
+#### Smooth Speed Transitions
+
+All motor drivers now support smooth speed transitions with the following parameters:
+
+- `duration` (float): Time in seconds to reach the target speed (default: 0.0 for immediate change)
+- `divisions` (int): Number of intermediate steps during the transition (default: 10)
+
+**Examples:**
+
+```python
+# Immediate speed change (traditional behavior)
+motor.set_speed("forward", 0.8)
+
+# Smooth acceleration over 2 seconds with 8 steps
+motor.set_speed("forward", 0.8, duration=2.0, divisions=8)
+
+# Smooth direction change with transition
+motor.set_speed("reverse", 0.6, duration=1.5, divisions=6)
+
+# Gradual stop over 1 second
+motor.set_speed("stopped", 0.0, duration=1.0, divisions=5)
+```
+
+#### Direction Change Behavior
+
+When changing direction with a duration > 0, the motor will:
+1. **First Phase**: Smoothly decelerate to zero speed in the current direction
+2. **Brief Pause**: 50ms pause at zero speed
+3. **Second Phase**: Smoothly accelerate to target speed in the new direction
+
+This prevents abrupt direction changes that could damage motors or cause mechanical stress.
 
 ### Direction Values
 
@@ -168,6 +219,8 @@ custom_driver = DRV8825Driver(
 
 ## Testing
 
+### YawController Testing
+
 Use the provided test script to verify both motor implementations:
 
 ```bash
@@ -179,6 +232,30 @@ python test_yaw_controller.py motorkit
 python test_yaw_controller.py drv8825
 python test_yaw_controller.py invalid
 ```
+
+### Smooth Transition Testing
+
+Test the new smooth speed transition functionality:
+
+```bash
+# Test smooth transitions with all available drivers
+python test_motor_transitions.py
+
+# Test continuous target-based transitions (recommended)
+python test_continuous_transitions.py
+
+# Run the example demonstrating smooth control
+python example_smooth_motor_control.py
+```
+
+The test scripts will demonstrate:
+- Immediate speed changes (traditional behavior)
+- Smooth acceleration and deceleration
+- Direction changes with smooth transitions
+- Gradual stopping
+- Different division settings for transition smoothness
+- **Continuous transitions**: Target updates without thread cancellation
+- **YawController simulation**: Frequent updates like real tracking applications
 
 ## Error Handling
 
@@ -294,11 +371,111 @@ yaw_controller = YawController(
 
 This prevents GPIO pin conflicts and ensures proper resource management.
 
+## Smooth Transition Implementation Details
+
+### Continuous Target-Based System
+
+The new implementation uses a continuous target-based approach instead of discrete transitions:
+
+```python
+# Single continuous thread per motor driver
+def _continuous_transition_loop(self):
+    while self.transition_active:
+        # Check current target vs actual speed/direction
+        # Take one step toward target
+        # Sleep briefly (20Hz update rate)
+```
+
+### Key Advantages
+
+- **No Thread Cancellation**: Frequent `set_speed` calls update targets instead of restarting threads
+- **Smooth Adaptation**: Motor smoothly adjusts to new targets mid-transition
+- **Perfect for Tracking**: Ideal for applications like yaw_controller that make frequent updates
+- **Resource Efficient**: Single thread per motor driver, not per transition
+
+### Target Update Mechanism
+
+When `set_speed` is called with duration > 0:
+1. Updates the target speed, direction, duration, and divisions
+2. Sets a flag indicating the target was updated
+3. The continuous loop adapts to the new target on the next iteration
+4. No existing transitions are canceled or interrupted
+
+### Thread Safety
+
+- Single continuous transition thread per motor driver
+- Thread-safe target updates using locks
+- Proper cleanup ensures threads are stopped when motors are stopped
+- No race conditions from multiple concurrent transitions
+
+### Performance Considerations
+
+- **Update Rate**: 20Hz (50ms) internal update rate for smooth motion
+- **Duration**: Longer durations provide smoother transitions
+- **Divisions**: Used to calculate step size, more divisions = finer control
+- **CPU Usage**: Minimal - single thread per driver running at 20Hz
+- **Recommended**: 4-10 divisions, 0.5-3 seconds duration for most applications
+
+## Example Usage Scenarios
+
+### Gentle Acceleration for Delicate Mechanisms
+
+```python
+# Slowly ramp up to avoid mechanical shock
+motor.set_speed("forward", 0.8, duration=3.0, divisions=12)
+```
+
+### Quick Direction Changes
+
+```python
+# Fast but smooth direction change
+motor.set_speed("reverse", 0.6, duration=0.5, divisions=4)
+```
+
+### Precise Stopping
+
+```python
+# Gradually come to a complete stop
+motor.set_speed("stopped", 0.0, duration=2.0, divisions=8)
+```
+
+### Tracking Applications (YawController Pattern)
+
+```python
+# Frequent updates - targets update smoothly without thread cancellation
+while tracking:
+    # Calculate new speed/direction based on person position
+    new_speed = calculate_tracking_speed()
+    new_direction = calculate_tracking_direction()
+    
+    # Update target - motor smoothly adapts to new target
+    motor.set_speed(new_direction, new_speed, duration=2.0, divisions=10)
+    
+    time.sleep(0.2)  # 5Hz update rate - no problem!
+```
+
+### Dynamic Target Updates
+
+```python
+# Start moving forward
+motor.set_speed("forward", 0.5, duration=2.0, divisions=8)
+time.sleep(0.5)
+
+# Change target mid-transition - motor smoothly adapts
+motor.set_speed("forward", 0.8, duration=1.5, divisions=6)
+time.sleep(0.3)
+
+# Change direction - motor will slow down then reverse
+motor.set_speed("reverse", 0.6, duration=2.0, divisions=8)
+```
+
 ## Future Enhancements
 
 Potential future improvements:
 - Support for additional stepper motor drivers
 - Configurable microstepping modes
-- Speed ramping and acceleration control
+- Non-linear acceleration curves (S-curves, exponential)
 - Position feedback and closed-loop control
 - Multiple motor support
+- Acceleration/deceleration limits
+- Speed profiling and motion planning
