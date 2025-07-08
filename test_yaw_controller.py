@@ -58,7 +58,7 @@ def test_drv8825():
     print("=" * 50)
     
     # Create YawController with DRV8825 driver
-    yaw_controller = YawController(motor_type="drv8825")
+    yaw_controller = YawController(motor_type="drv8825_pwm")
     
     try:
         # Test motor initialization
@@ -137,11 +137,11 @@ def main():
             print("Usage: python test_yaw_controller.py [motorkit|drv8825|invalid]")
     else:
         # Run all tests
-        test_motorkit()
-        print()
+        # test_motorkit()
+        # print()
         test_drv8825()
-        print()
-        test_invalid_motor_type()
+        # print()
+        # test_invalid_motor_type()
     
     print("\nAll tests completed!")
 

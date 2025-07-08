@@ -6,6 +6,7 @@ Provides stepper motor control with consistent timing using hardware PWM.
 import threading
 import time
 import lgpio
+from rpi_hardware_pwm import HardwarePWM
 from .base_driver import MotorDriver
 
 
@@ -24,15 +25,22 @@ class DRV8825DriverPWM(MotorDriver):
         self.gpio_handle = gpio_handle
         self.owns_handle = False
         
-        # PWM control
+        # Hardware PWM control
+        self.hardware_pwm = None  # HardwarePWM instance
         self.pwm_frequency = 0  # Current PWM frequency (0 = stopped)
         self.pwm_duty_cycle = 50  # 50% duty cycle for square wave
         self.pwm_active = False
         
         # Speed mapping parameters - converted to frequency ranges
-        self.min_frequency = 50   # Slowest stepping (50 Hz = 20ms period = 0.01s per half-step)
-        self.max_frequency = 500  # Fastest stepping (500 Hz = 2ms period = 0.001s per half-step)
+        # Start with much slower frequencies to ensure motor can step properly
+        # Based on original driver default of 0.005s step_delay = 100Hz total frequency
+        self.min_frequency = 50   # Very slow: 10Hz (100ms period)
+        self.max_frequency = 500  # Moderate: 100Hz (10ms period, matches original default)
         self.current_frequency = 0
+        
+        # Limit speed changes to avoid abrupt stepper movements
+        self.speed_change_threshold = 0.1  # Minimum speed change to trigger update
+        self.limit_speed_updates = True
         
         # Target state for PWM control
         self.target_direction = "stopped"
@@ -52,15 +60,25 @@ class DRV8825DriverPWM(MotorDriver):
     
     def start(self) -> bool:
         """
-        Initialize and start the DRV8825 driver with PWM control.
+        Initialize and start the DRV8825 driver with hardware PWM control.
         
         Returns:
             bool: True if successful, False otherwise
         """
         try:
-            # Setup GPIO pins
+            # Initialize hardware PWM for step pin FIRST (before claiming any GPIO pins)
+            if self.step_pin == 18:
+                pwm_channel = 2
+            elif self.step_pin == 19:
+                pwm_channel = 1
+            else:
+                raise ValueError(f"Step pin {self.step_pin} is not a hardware PWM pin. Use GPIO 18 or 19.")
+            
+            self.hardware_pwm = HardwarePWM(pwm_channel=pwm_channel, hz=self.min_frequency, chip=0)
+            print(f"DRV8825DriverPWM: Hardware PWM initialized on GPIO {self.step_pin} (channel {pwm_channel})")
+            
+            # Setup GPIO pins (step pin is NOT claimed by lgpio - it's controlled by hardware PWM)
             lgpio.gpio_claim_output(self.gpio_handle, self.dir_pin)
-            lgpio.gpio_claim_output(self.gpio_handle, self.step_pin)
             lgpio.gpio_claim_output(self.gpio_handle, self.enable_pin)
             
             # Setup mode pins for fullstep mode
@@ -70,10 +88,9 @@ class DRV8825DriverPWM(MotorDriver):
             
             # Initialize pins to safe state
             lgpio.gpio_write(self.gpio_handle, self.dir_pin, 0)
-            lgpio.gpio_write(self.gpio_handle, self.step_pin, 0)
             lgpio.gpio_write(self.gpio_handle, self.enable_pin, 0)  # Disabled initially
             
-            print("DRV8825DriverPWM: GPIO pins initialized")
+            print("DRV8825DriverPWM: GPIO pins and hardware PWM initialized")
             self.enabled = True
             return True
             
@@ -125,9 +142,11 @@ class DRV8825DriverPWM(MotorDriver):
         # Clamp speed to valid range
         speed = max(0.0, min(1.0, speed))
         
-        if speed >= self.target_speed + 0.1 or speed <= self.target_speed - 0.1:
-            print(f"DRV8825DriverPWM: Speed change detected: {speed:.3f} (target: {self.target_speed:.3f})")
-        
+        update_speed = not self.limit_speed_updates
+        if update_speed and speed >= self.target_speed + self.speed_change_threshold or speed <= self.target_speed - self.speed_change_threshold:
+            update_speed = True
+                
+        if update_speed:
             with self.control_lock:
                 self.target_direction = direction
                 self.target_speed = speed
@@ -151,54 +170,70 @@ class DRV8825DriverPWM(MotorDriver):
                     
                     # Start/update PWM
                     self._start_pwm(frequency)
-            
-            # Update current state
-            self.current_speed = speed
-            self.current_direction = direction
-            
-            # Calculate steps per second for debugging
-            steps_per_sec = frequency if frequency > 0 else 0
-            print(f"DRV8825DriverPWM: Set direction={direction}, speed={speed:.3f}, frequency={frequency:.1f}Hz (~{steps_per_sec:.1f} steps/sec)")
+                
+                # Update current state
+                self.current_speed = speed
+                self.current_direction = direction
+                
+                # Calculate steps per second for debugging
+                steps_per_sec = frequency if frequency > 0 else 0
+                print(f"DRV8825DriverPWM: Set direction={direction}, speed={speed:.3f}, frequency={frequency:.1f}Hz (~{steps_per_sec:.1f} steps/sec)")
     
     def _start_pwm(self, frequency: float):
-        """Start or update PWM on the step pin"""
+        """Start or update hardware PWM on the step pin"""
         try:
+            if not self.hardware_pwm:
+                print("DRV8825DriverPWM: Hardware PWM not initialized")
+                return
+                
             if self.pwm_active:
                 # Update existing PWM frequency
-                lgpio.tx_pwm(self.gpio_handle, self.step_pin, frequency, self.pwm_duty_cycle)
+                self.hardware_pwm.change_frequency(frequency)
             else:
-                # Start new PWM
-                lgpio.tx_pwm(self.gpio_handle, self.step_pin, frequency, self.pwm_duty_cycle)
+                # Start new hardware PWM
+                self.hardware_pwm.start(self.pwm_duty_cycle)
+                self.hardware_pwm.change_frequency(frequency)
                 self.pwm_active = True
                 
             self.pwm_frequency = frequency
+            print(f"DRV8825DriverPWM: Hardware PWM started at {frequency:.1f}Hz, {self.pwm_duty_cycle}% duty cycle")
             
         except Exception as e:
-            print(f"DRV8825DriverPWM: Error starting PWM: {e}")
+            print(f"DRV8825DriverPWM: Error starting hardware PWM: {e}")
     
     def _stop_pwm(self):
-        """Stop PWM on the step pin"""
+        """Stop hardware PWM on the step pin"""
         try:
-            if self.pwm_active:
-                lgpio.tx_pwm(self.gpio_handle, self.step_pin, 0, 0)  # Stop PWM
-                lgpio.gpio_write(self.gpio_handle, self.step_pin, 0)  # Ensure pin is LOW
+            if self.pwm_active and self.hardware_pwm:
+                self.hardware_pwm.stop()
                 self.pwm_active = False
                 self.pwm_frequency = 0
+                print("DRV8825DriverPWM: Hardware PWM stopped")
                 
         except Exception as e:
-            print(f"DRV8825DriverPWM: Error stopping PWM: {e}")
+            print(f"DRV8825DriverPWM: Error stopping hardware PWM: {e}")
     
     def _cleanup_gpio(self):
-        """Cleanup GPIO resources"""
+        """Cleanup GPIO resources and hardware PWM"""
         try:
+            # Stop hardware PWM first
+            self._stop_pwm()
+            
+            # Cleanup hardware PWM instance
+            if self.hardware_pwm:
+                try:
+                    # Ensure PWM is stopped before cleanup
+                    if self.pwm_active:
+                        self.hardware_pwm.stop()
+                    self.hardware_pwm = None
+                    print("DRV8825DriverPWM: Hardware PWM cleaned up")
+                except Exception as e:
+                    print(f"DRV8825DriverPWM: Error cleaning up hardware PWM: {e}")
+            
             if self.gpio_handle:
-                # Stop PWM first
-                self._stop_pwm()
-                
-                # Free GPIO pins
+                # Free GPIO pins (step pin is handled by hardware PWM, not lgpio)
                 try:
                     lgpio.gpio_free(self.gpio_handle, self.dir_pin)
-                    lgpio.gpio_free(self.gpio_handle, self.step_pin)
                     lgpio.gpio_free(self.gpio_handle, self.enable_pin)
                     
                     for pin in self.mode_pins:
