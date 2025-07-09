@@ -34,8 +34,8 @@ class DRV8825DriverPWM(MotorDriver):
         # Speed mapping parameters - converted to frequency ranges
         # Start with much slower frequencies to ensure motor can step properly
         # Based on original driver default of 0.005s step_delay = 100Hz total frequency
-        self.min_frequency = 100   # Very slow: 10Hz (100ms period)
-        self.max_frequency = 1000  # Moderate: 100Hz (10ms period, matches original default)
+        self.min_frequency = 200   # Very slow: 10Hz (100ms period)
+        self.max_frequency = 700  # Moderate: 100Hz (10ms period, matches original default)
         self.current_frequency = 0
         
         # Limit speed changes to avoid abrupt stepper movements
@@ -82,6 +82,12 @@ class DRV8825DriverPWM(MotorDriver):
             lgpio.gpio_claim_output(self.gpio_handle, self.enable_pin)
             
             # Setup mode pins for fullstep mode
+            # lgpio.gpio_claim_output(self.gpio_handle, self.mode_pins[0])
+            # lgpio.gpio_write(self.gpio_handle, self.mode_pins[0], 0)  # Fullstep mode (0,0,0)
+            # lgpio.gpio_claim_output(self.gpio_handle, self.mode_pins[1])
+            # lgpio.gpio_write(self.gpio_handle, self.mode_pins[1], 0)  # Fullstep mode (0,0,0)
+            # lgpio.gpio_claim_output(self.gpio_handle, self.mode_pins[2])
+            # lgpio.gpio_write(self.gpio_handle, self.mode_pins[2], 0)  # Fullstep mode (0,0,0)
             for pin in self.mode_pins:
                 lgpio.gpio_claim_output(self.gpio_handle, pin)
                 lgpio.gpio_write(self.gpio_handle, pin, 0)  # Fullstep mode (0,0,0)

@@ -7,5 +7,6 @@ from .base_driver import MotorDriver
 from .motorkit_driver import MotorKitDriver
 from .drv8825_driver import DRV8825Driver
 from .drv8825_driver_pwm import DRV8825DriverPWM
+from .drv8825_driver_pwm_proxy import DRV8825DriverPWMProxy
 
-__all__ = ['MotorDriver', 'MotorKitDriver', 'DRV8825Driver', 'DRV8825DriverPWM']
+__all__ = ['MotorDriver', 'MotorKitDriver', 'DRV8825Driver', 'DRV8825DriverPWM', 'DRV8825DriverPWMProxy']

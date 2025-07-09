@@ -73,10 +73,10 @@ def test_drv8825():
             # Test motor movements (simulated)
             print("Testing motor movements...")
             yaw_controller._set_motor_forward(1.0)
-            time.sleep(5)
+            time.sleep(20)
             
             yaw_controller._set_motor_reverse(1.0)
-            time.sleep(5)
+            time.sleep(20)
             
             yaw_controller._stop_motor()
             print("✓ Motor movements completed")
@@ -91,6 +91,71 @@ def test_drv8825():
         # Cleanup
         yaw_controller.stop_motor_control()
         print("✓ DRV8825 test completed")
+
+
+def test_drv8825_multiprocess():
+    """Test YawController with DRV8825 multiprocess driver"""
+    print("=" * 50)
+    print("Testing YawController with DRV8825 multiprocess driver")
+    print("=" * 50)
+    
+    # Create YawController with DRV8825 multiprocess driver
+    yaw_controller = YawController(motor_type="drv8825_pwm_multiprocess")
+    
+    try:
+        # Test motor initialization
+        print("Starting motor control...")
+        if yaw_controller.start_motor_control():
+            print("✓ Motor control started successfully")
+            
+            # Get motor stats
+            stats = yaw_controller.get_motor_stats()
+            print(f"Motor stats: {stats}")
+            
+            # Test motor movements (simulated)
+            print("Testing motor movements...")
+            yaw_controller._set_motor_forward(1.0)
+            time.sleep(5)
+            
+            yaw_controller._set_motor_reverse(0.5)
+            time.sleep(5)
+            
+            yaw_controller._set_motor_forward(0.25)
+            time.sleep(5)
+            
+            yaw_controller._stop_motor()
+            print("✓ Motor movements completed")
+            
+            # Test rapid command changes (simulating web server load)
+            print("Testing rapid command changes...")
+            commands = [
+                ("forward", 0.3),
+                ("forward", 0.6),
+                ("forward", 0.9),
+                ("reverse", 0.4),
+                ("reverse", 0.7),
+                ("stopped", 0.0)
+            ]
+            
+            for direction, speed in commands:
+                print(f"  Setting {direction} @ {speed}")
+                yaw_controller._send_motor_command(direction, speed)
+                time.sleep(1)
+            
+            print("✓ Rapid command test completed")
+            
+        else:
+            print("✗ Failed to start motor control")
+            
+    except Exception as e:
+        print(f"✗ Error during DRV8825 multiprocess test: {e}")
+        import traceback
+        traceback.print_exc()
+    
+    finally:
+        # Cleanup
+        yaw_controller.stop_motor_control()
+        print("✓ DRV8825 multiprocess test completed")
 
 
 def test_invalid_motor_type():
@@ -123,28 +188,34 @@ def main():
     print("YawController Motor Driver Test Suite")
     print("====================================")
     
-    # Parse command line arguments
-    if len(sys.argv) > 1:
-        test_type = sys.argv[1].lower()
-        if test_type == "motorkit":
-            test_motorkit()
-        elif test_type == "drv8825":
-            test_drv8825()
-        elif test_type == "invalid":
-            test_invalid_motor_type()
-        else:
-            print(f"Unknown test type: {test_type}")
-            print("Usage: python test_yaw_controller.py [motorkit|drv8825|invalid]")
-    else:
-        # Run all tests
-        # test_motorkit()
-        # print()
-        test_drv8825()
-        # print()
-        # test_invalid_motor_type()
-    
-    print("\nAll tests completed!")
-
+    while True:
+        try:
+            # Parse command line arguments
+            if len(sys.argv) > 1:
+                test_type = sys.argv[1].lower()
+                if test_type == "motorkit":
+                    test_motorkit()
+                elif test_type == "drv8825":
+                    test_drv8825()
+                elif test_type == "multiprocess":
+                    test_drv8825_multiprocess()
+                elif test_type == "invalid":
+                    test_invalid_motor_type()
+                else:
+                    print(f"Unknown test type: {test_type}")
+                    print("Usage: python test_yaw_controller.py [motorkit|drv8825|multiprocess|invalid]")
+            else:
+                # Run all tests
+                test_motorkit()
+                print()
+                test_drv8825()
+                print()
+                test_invalid_motor_type()
+            
+            print("\nAll tests completed!")
+        except KeyboardInterrupt:
+            print("\nTest interrupted by user")
+            break
 
 if __name__ == "__main__":
     main()

@@ -7,7 +7,7 @@ import threading
 import time
 import math
 from typing import Optional, Dict, Any
-from motor_drivers import MotorDriver, MotorKitDriver, DRV8825Driver, DRV8825DriverPWM
+from motor_drivers import MotorDriver, MotorKitDriver, DRV8825Driver, DRV8825DriverPWM, DRV8825DriverPWMProxy
 
 
 class YawController:
@@ -97,6 +97,8 @@ class YawController:
                     self.motor_driver = DRV8825Driver(gpio_handle=self.gpio_handle)
                 elif self.motor_type == "drv8825_pwm":
                     self.motor_driver = DRV8825DriverPWM(gpio_handle=self.gpio_handle)
+                elif self.motor_type == "drv8825_pwm_multiprocess":
+                    self.motor_driver = DRV8825DriverPWMProxy(gpio_handle=self.gpio_handle)
                 else:
                     print(f"YawController: Unknown motor type: {self.motor_type}")
                     return False
@@ -193,7 +195,7 @@ class YawController:
                 self._update_motor_control_from_parameters(movement_direction, normalized_speed, tracked_person_id)
                 
                 # Control loop frequency (10 Hz)
-                time.sleep(0.2)
+                time.sleep(1)
                 
             except Exception as e:
                 print(f"YawController: Error in control loop: {e}")
