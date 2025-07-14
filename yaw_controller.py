@@ -7,7 +7,7 @@ import threading
 import time
 import math
 from typing import Optional, Dict, Any
-from motor_drivers import MotorDriver, MotorKitDriver, DRV8825Driver, DRV8825DriverPWM, DRV8825DriverPWMProxy
+from motor_drivers import MotorDriver, MotorKitDriver, MotorKitStepperProxy, DRV8825Driver, DRV8825DriverPWM, DRV8825DriverPWMProxy
 
 
 class YawController:
@@ -93,6 +93,8 @@ class YawController:
                 # Create the appropriate motor driver based on motor_type
                 if self.motor_type == "motorkit":
                     self.motor_driver = MotorKitDriver()
+                elif self.motor_type == "motorkit_stepper":
+                    self.motor_driver = MotorKitStepperProxy()
                 elif self.motor_type == "drv8825":
                     self.motor_driver = DRV8825Driver(gpio_handle=self.gpio_handle)
                 elif self.motor_type == "drv8825_pwm":

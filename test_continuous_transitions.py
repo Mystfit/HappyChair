@@ -7,6 +7,7 @@ Tests the new target-based system that updates smoothly without canceling thread
 import time
 import sys
 from motor_drivers.motorkit_driver import MotorKitDriver
+from motor_drivers.motorkit_stepper_proxy import MotorKitStepperProxy
 from motor_drivers.drv8825_driver import DRV8825Driver
 from motor_drivers.drv8825_driver_pwm import DRV8825DriverPWM
 
@@ -119,12 +120,19 @@ def main():
     # Test available drivers
     drivers_to_test = []
     
-    # Add MotorKit driver (most likely to work without hardware)
+    # Add MotorKit drivers
     try:
         motorkit_driver = MotorKitDriver()
         # drivers_to_test.append((motorkit_driver, "MotorKitDriver"))
     except Exception as e:
         print(f"MotorKitDriver not available: {e}")
+    
+    # Add MotorKit Stepper driver (new multiprocess stepper implementation)
+    try:
+        motorkit_stepper_driver = MotorKitStepperProxy()
+        drivers_to_test.append((motorkit_stepper_driver, "MotorKitStepperProxy"))
+    except Exception as e:
+        print(f"MotorKitStepperProxy not available: {e}")
     
     # Add DRV8825 drivers (require specific hardware)
     try:
@@ -154,6 +162,8 @@ def main():
             # Create new instance for simulation test
             if name == "MotorKitDriver":
                 sim_driver = MotorKitDriver()
+            elif name == "MotorKitStepperProxy":
+                sim_driver = MotorKitStepperProxy()
             elif name == "DRV8825Driver":
                 sim_driver = DRV8825Driver()
             elif name == "DRV8825DriverPWM":

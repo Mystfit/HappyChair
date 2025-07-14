@@ -15,7 +15,7 @@ def test_motorkit():
     print("Testing YawController with MotorKit driver")
     print("=" * 50)
     
-    # Create YawController with MotorKit driver (default)
+    # Create YawController with MotorKit driver
     yaw_controller = YawController(motor_type="motorkit")
     
     try:
@@ -49,6 +49,72 @@ def test_motorkit():
         # Cleanup
         yaw_controller.stop_motor_control()
         print("✓ MotorKit test completed")
+
+
+def test_motorkit_stepper():
+    """Test YawController with MotorKit Stepper driver"""
+    print("=" * 50)
+    print("Testing YawController with MotorKit Stepper driver")
+    print("=" * 50)
+    
+    # Create YawController with MotorKit Stepper driver
+    yaw_controller = YawController(motor_type="motorkit_stepper")
+    
+    try:
+        # Test motor initialization
+        print("Starting motor control...")
+        if yaw_controller.start_motor_control():
+            print("✓ Motor control started successfully")
+            
+            # Get motor stats
+            stats = yaw_controller.get_motor_stats()
+            print(f"Motor stats: {stats}")
+            
+            # Test motor movements (simulated)
+            print("Testing stepper motor movements...")
+            yaw_controller._set_motor_forward(0.5)
+            time.sleep(3)
+            
+            yaw_controller._set_motor_reverse(0.3)
+            time.sleep(3)
+            
+            yaw_controller._set_motor_forward(0.8)
+            time.sleep(2)
+            
+            yaw_controller._stop_motor()
+            print("✓ Stepper motor movements completed")
+            
+            # Test rapid command changes (simulating person tracking)
+            print("Testing rapid stepper command changes...")
+            commands = [
+                ("forward", 0.2),
+                ("forward", 0.4),
+                ("forward", 0.6),
+                ("reverse", 0.3),
+                ("reverse", 0.5),
+                ("stopped", 0.0)
+            ]
+            
+            for direction, speed in commands:
+                print(f"  Setting stepper {direction} @ {speed}")
+                yaw_controller._send_motor_command(direction, speed, duration=1.5, divisions=3)
+                time.sleep(0.5)  # Quick changes like real tracking
+            
+            time.sleep(2)  # Let final command complete
+            print("✓ Rapid stepper command test completed")
+            
+        else:
+            print("✗ Failed to start motor control")
+            
+    except Exception as e:
+        print(f"✗ Error during MotorKit Stepper test: {e}")
+        import traceback
+        traceback.print_exc()
+    
+    finally:
+        # Cleanup
+        yaw_controller.stop_motor_control()
+        print("✓ MotorKit Stepper test completed")
 
 
 def test_drv8825():
@@ -195,6 +261,8 @@ def main():
                 test_type = sys.argv[1].lower()
                 if test_type == "motorkit":
                     test_motorkit()
+                elif test_type == "motorkit_stepper":
+                    test_motorkit_stepper()
                 elif test_type == "drv8825":
                     test_drv8825()
                 elif test_type == "multiprocess":
@@ -203,10 +271,12 @@ def main():
                     test_invalid_motor_type()
                 else:
                     print(f"Unknown test type: {test_type}")
-                    print("Usage: python test_yaw_controller.py [motorkit|drv8825|multiprocess|invalid]")
+                    print("Usage: python test_yaw_controller.py [motorkit|motorkit_stepper|drv8825|multiprocess|invalid]")
             else:
                 # Run all tests
                 test_motorkit()
+                print()
+                test_motorkit_stepper()
                 print()
                 test_drv8825()
                 print()
