@@ -6,7 +6,7 @@ from flask_cors import CORS
 from werkzeug.utils import secure_filename
 from gevent import pywsgi
 from geventwebsocket.handler import WebSocketHandler
-from Servo.Animation import Animation, AnimationPlayer, AnimationLayer, Playlist
+from Servo.Animation import ServoAnimationClip, ServoAnimationController, ServoAnimationLayer, Playlist
 from pathlib import Path
 from io_controller import IOController
 from camera_controller import CameraController
@@ -19,9 +19,9 @@ import os, subprocess, json, time, sys
 # Dictionary to store available animations (Animation objects)
 available_animations = {}
 
-# Animation layers are now stored directly in the AnimationPlayer
+# Animation layers are now stored directly in the AnimationController
 playlists = {}
-player = AnimationPlayer()
+animation_controller = ServoAnimationController()
 
 def shutdown(signum, frame):
     if yaw_controller:
@@ -48,20 +48,20 @@ def get_animation_paths(folder_path):
 def load_animation(anim_path):
     """Load an animation file into the available_animations dictionary"""
     global available_animations
-    animation = Animation(anim_path)
+    animation = ServoAnimationClip(anim_path)
     available_animations[anim_path.stem] = animation
     print(f"Loaded animation: {anim_path.stem}")
     
 def create_animation_layer(animation_name, weight=0.0, loop=False):
     """Create an animation layer for the specified animation and add it to the player"""
-    global available_animations, player
+    global available_animations, animation_controller
     if animation_name not in available_animations:
         print(f"Animation not found: {animation_name}")
         return None
     
     animation = available_animations[animation_name]
     # Use the player's create_layer method to create and add the layer
-    return player.create_layer(animation, animation_name, weight, loop)
+    return animation_controller.create_layer(animation, animation_name, weight, loop)
     
 def activate_playlist(playlist_path):
     global playlists
@@ -136,10 +136,10 @@ def legacy_interface():
     return render_template('index.html', 
                           animation_names=animation_names, 
                           playlist_names=playlist_names,
-                          global_framerate=player.framerate,
-                          transport_playing=player.is_playing(),
+                          global_framerate=animation_controller.framerate,
+                          transport_playing=animation_controller.is_playing(),
                           playlist_transport_playing=False,
-                          animation_mode=player.animation_mode(),
+                          animation_mode=animation_controller.animation_mode(),
                           active_tab='#transport-tab')
 
 # API Endpoints
@@ -147,9 +147,9 @@ def legacy_interface():
 def get_animations():
     return jsonify({
         'animations': list(available_animations.keys()),
-        'global_framerate': player.framerate,
-        'transport_playing': player.is_playing(),
-        'animation_mode': player.animation_mode()
+        'global_framerate': animation_controller.framerate,
+        'transport_playing': animation_controller.is_playing(),
+        'animation_mode': animation_controller.animation_mode()
     })
 
 @app.route('/api/playlists', methods=['GET'])
@@ -161,29 +161,29 @@ def get_playlists():
 
 @app.route('/api/transport', methods=['POST'])
 def api_set_transport():
-    global player
+    global animation_controller
     data = request.json
     transport_status = data.get('transport')
     
     if transport_status == "play":
-        player.play()
+        animation_controller.play()
     elif transport_status == "pause":
-        player.pause()
+        animation_controller.pause()
     elif transport_status == "stop":
-        player.stop()
+        animation_controller.stop()
     
     if 'global_framerate' in data:
-        player.framerate = float(data['global_framerate'])
+        animation_controller.framerate = float(data['global_framerate'])
     
     return jsonify({
         'success': True,
-        'transport_playing': player.is_playing(),
-        'global_framerate': player.framerate
+        'transport_playing': animation_controller.is_playing(),
+        'global_framerate': animation_controller.framerate
     })
 
 @app.route('/api/animation/play', methods=['POST'])
 def api_play_animation():
-    global player, available_animations
+    global animation_controller, available_animations
     data = request.json
     animation_name = data.get('animation_name')
     animation_weight = data.get('weight')
@@ -192,7 +192,7 @@ def api_play_animation():
     # Check if the animation exists in available animations
     if animation_name in available_animations:
         # Get the layer if it exists, or create a new one
-        layer = player.get_layer_by_name(animation_name)
+        layer = animation_controller.get_layer_by_name(animation_name)
         
         if not layer:
             print(f"Creating new layer for animation: {animation_name}")
@@ -205,7 +205,7 @@ def api_play_animation():
             layer.looping = False
         
         print(f"Starting animation: {animation_name} with looping={layer.looping}")
-        player.animate_layer_weight(layer, float(animation_weight), float(interp_duration))
+        animation_controller.animate_layer_weight(layer, float(animation_weight), float(interp_duration))
         # Play but preserve the non-looping setting
         layer.play(loop=False)
         
@@ -220,14 +220,14 @@ def api_play_animation():
 
 @app.route('/api/animation/pause', methods=['POST'])
 def api_pause_animation():
-    global player, available_animations
+    global animation_controller, available_animations
     data = request.json
     animation_name = data.get('animation_name')
     
     # Check if the animation exists in available animations
     if animation_name in available_animations:
         # Get the layer if it exists
-        layer = player.get_layer_by_name(animation_name)
+        layer = animation_controller.get_layer_by_name(animation_name)
         
         if layer:
             print(f"Pausing animation: {animation_name}")
@@ -244,14 +244,14 @@ def api_pause_animation():
 
 @app.route('/api/animation/rewind', methods=['POST'])
 def api_rewind_animation():
-    global player, available_animations
+    global animation_controller, available_animations
     data = request.json
     animation_name = data.get('animation_name')
     
     # Check if the animation exists in available animations
     if animation_name in available_animations:
         # Get the layer if it exists
-        layer = player.get_layer_by_name(animation_name)
+        layer = animation_controller.get_layer_by_name(animation_name)
         
         if layer:
             print(f"Rewinding animation: {animation_name}")
@@ -325,7 +325,7 @@ def api_add_playlist():
 
 @app.route('/api/playlist/transport', methods=['POST'])
 def api_set_playlist_transport():
-    global player
+    global animation_controller
     data = request.json
     transport_status = data.get('transport')
     playlist_name = data.get('playlist_name')
@@ -337,12 +337,12 @@ def api_set_playlist_transport():
     print(f'Playlist transport status changed to: {transport_status}. Does it match? {transport_status == "play"}')
 
     if transport_status == "play":
-        player.set_playlist(playlist)
+        animation_controller.set_playlist(playlist)
     elif transport_status == "pause":
         pass  # Currently not implemented in the backend
     elif transport_status == "stop":
-        player.stop()
-        player.reset_playlist()
+        animation_controller.stop()
+        animation_controller.reset_playlist()
     
     return jsonify({
         'success': True,
@@ -643,16 +643,16 @@ def api_yaw_status():
 # WebSocket routes
 @sock.route('/api/ws/status')
 def animation_status(ws):
-    global player, io_controller, camera_controller, yaw_controller
+    global animation_controller, io_controller, camera_controller, yaw_controller
     try:
         # Check if the WebSocket is still connected
         while ws.connected:
             # Get animation mode from player
-            anim_mode = player.animation_mode()
+            anim_mode = animation_controller.animation_mode()
             # print(f"Current animation mode: {anim_mode}")
             
             # Get active animations directly from the player
-            active_animations = player.get_active_layers()
+            active_animations = animation_controller.get_active_layers()
             
             # Get controller data
             gpio_pins = {}
@@ -674,9 +674,9 @@ def animation_status(ws):
             #     print(f"  {anim['name']}: playing={anim['is_playing']}, weight={anim['weight']}, frame={anim['current_frame']}/{anim['total_frames']}")
             
             status = {
-                'is_playing': player.is_playing(),
-                'animation_mode': player.animation_mode(),
-                'global_framerate': player.framerate,
+                'is_playing': animation_controller.is_playing(),
+                'animation_mode': animation_controller.animation_mode(),
+                'global_framerate': animation_controller.framerate,
                 'active_animations': active_animations,
                 'gpio_pins': gpio_pins,
                 'camera_stats': camera_stats,
@@ -685,7 +685,7 @@ def animation_status(ws):
             
             try:
                 ws.send(json.dumps(status))
-                time.sleep(1 / player.framerate * 0.5)  # Update at framerate
+                time.sleep(1 / animation_controller.framerate * 0.5)  # Update at framerate
             except Exception as inner_e:
                 print(f"WebSocket send error: {inner_e}")
                 break
@@ -703,7 +703,7 @@ def handle_blender_index(ws):
     
 @sock.route('/live')
 def handle_blender_live(ws):
-    global player
+    global animation_controller
     while True:
         message = ws.receive()
         command_start = message[0]
@@ -712,26 +712,26 @@ def handle_blender_live(ws):
             angle = int.from_bytes(message[2:4], byteorder='big')
             command_end = message[4]
             # print("Raw message: " + str(message )+ ", Servo ID: " + str(servo_id) + ", value: " + str(angle))
-            player.rotate_servo(servo_id, angle)
+            animation_controller.rotate_servo(servo_id, angle)
             
 
 
 # Create a single base layer that we can return to when animations finish playing
 base_layer = create_animation_layer("idle", 1.0, True)
 base_layer.play()
-player.start()
+animation_controller.start()
 
 if __name__ == '__main__':
     # Set up signal handler for SIGINT (Ctrl-C)
     signal.signal(signal.SIGINT, shutdown)
         
-    #player = AnimationPlayer().start()
-    player.add_servo(15, "shoulder.R", None,  (500, 2500))
-    player.add_servo(14, "elbow.R", None,  (500, 2500))
-    player.add_servo(13, "hand.R", None,  (500, 2500))
-    player.add_servo(11, "shoulder.L", None,  (500, 2500))
-    player.add_servo(10, "elbow.L", None,  (500, 2500))
-    player.add_servo(12, "hand.L", None,  (500, 2500))
+    #player = AnimationController().start()
+    animation_controller.add_servo(15, "shoulder.R", None,  (500, 2500))
+    animation_controller.add_servo(14, "elbow.R", None,  (500, 2500))
+    animation_controller.add_servo(13, "hand.R", None,  (500, 2500))
+    animation_controller.add_servo(11, "shoulder.L", None,  (500, 2500))
+    animation_controller.add_servo(10, "elbow.L", None,  (500, 2500))
+    animation_controller.add_servo(12, "hand.L", None,  (500, 2500))
     
     #player.play()
     #server = pywsgi.WSGIServer(('', 5000), app, handler_class=WebSocketHandler)

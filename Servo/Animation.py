@@ -42,7 +42,7 @@ class Playlist(object):
         
 
 
-class AnimationPlayer(object):
+class ServoAnimationController(object):
     PLAYLIST_MODE = "playlist"
     TRANSPORT_MODE = "transport"
     LIVE_MODE = "live"
@@ -63,7 +63,7 @@ class AnimationPlayer(object):
         
         self.framerate = 60
         self.stopped = False
-        self._animation_mode = AnimationPlayer.TRANSPORT_MODE
+        self._animation_mode = ServoAnimationController.TRANSPORT_MODE
         self._is_playing = False
         self._next_frame_time = datetime.now()
         self._last_frame_time = datetime.now()
@@ -90,7 +90,7 @@ class AnimationPlayer(object):
         return self._animation_mode
     
     def set_animation_mode(self, mode):
-        self.set_live_mode(self.animation_mode() == AnimationPlayer.LIVE_MODE)
+        self.set_live_mode(self.animation_mode() == ServoAnimationController.LIVE_MODE)
         self._animation_mode = mode
         
     def set_live_mode(self, active):
@@ -161,9 +161,9 @@ class AnimationPlayer(object):
         """Create an animation layer and add it to the player"""
         # If transient is None, default to the appropriate value based on mode and loop status
         if transient is None:
-            transient = not loop and self.animation_mode() == AnimationPlayer.TRANSPORT_MODE
+            transient = not loop and self.animation_mode() == ServoAnimationController.TRANSPORT_MODE
         
-        layer = AnimationLayer(animation, loop, weight, transient=transient)
+        layer = ServoAnimationLayer(animation, loop, weight, transient=transient)
         
         # Set callbacks to trigger when layer is ready to blend out
         layer.blend_out_frame_duration = self._interpolation_duration * self.framerate
@@ -377,7 +377,7 @@ class AnimationPlayer(object):
             print(f"Angle {angle} out of range for servo {servo_id}. Ignoring")
 
 
-class AnimationLayer(object):
+class ServoAnimationLayer(object):
     def __init__(self, animation, loop = False, weight = 1.0, on_completed_fn = lambda: None, transient = False, blend_out_frames = 60, on_start_blend_out_fn = lambda: None):
         self.looping = loop
         self.current_animation = animation
@@ -500,7 +500,7 @@ class AnimationLayer(object):
         return self._is_playing
 
 
-class Animation(object):
+class ServoAnimationClip(object):
     def __init__(self, path):
         self.name = os.path.basename(path)
         f = open(path)
@@ -519,7 +519,7 @@ class Animation(object):
      
 
 if __name__ == "__main__":
-    player = AnimationPlayer().start()
+    player = ServoAnimationController().start()
     player.add_servo(15, "shoulder.R", None,  (500, 2500))
     player.add_servo(14, "elbow.R", None,  (500, 2500))
     player.add_servo(13, "hand.R", None,  (500, 2500))
@@ -558,7 +558,7 @@ if __name__ == "__main__":
     #anim_layer2 = AnimationLayer(anim2, True, 0.0)
     #player.add_layer(anim_layer1)
     #player.add_layer(anim_layer2)
-    anim1 = Animation(Path( __file__ ).absolute().parent / ".." / "Animations" / "wave_only.json")
-    anim_layer1 = AnimationLayer(anim1, True, 1.0)#, stepper_wiggle)
+    anim1 = ServoAnimationClip(Path( __file__ ).absolute().parent / ".." / "Animations" / "wave_only.json")
+    anim_layer1 = ServoAnimationLayer(anim1, True, 1.0)#, stepper_wiggle)
     player.add_layer(anim_layer1)
     player.play()
