@@ -1,27 +1,21 @@
 """
-IOController class for managing input/output operations on Raspberry Pi.
-Handles camera detection, GPIO pin monitoring, and event dispatching.
+IOController class for managing GPIO input/output operations on Raspberry Pi.
+Handles GPIO pin monitoring and event dispatching.
 """
 
 import threading
 import time
 import lgpio
 from typing import Optional, Dict, Any, List, Callable
-from detection_multiprocess import PersonDetectionMultiprocess
 
 
 class IOController:
     """
-    Controls input/output operations including camera detection and GPIO monitoring.
+    Controls GPIO input/output operations and pin monitoring.
     Dispatches events to registered callbacks for decoupled system architecture.
     """
     
-    def __init__(self, buffer_name: str = "happychair_detection_buffer"):
-        self.buffer_name = buffer_name
-        
-        # Detection system (moved from YawController)
-        self.person_detector = None
-        
+    def __init__(self):
         # GPIO pin management
         self.registered_pins = {}  # pin_number: {name, bias, state, last_changed, callback}
         self.gpio_handle = None
@@ -34,9 +28,6 @@ class IOController:
         self.gpio_thread = None
         self.gpio_thread_running = False
         self.gpio_lock = threading.Lock()
-        
-        # Statistics
-        self.unique_people_seen = set()
         
         print("IOController initialized")
     
@@ -54,7 +45,7 @@ class IOController:
                 return False
         return True
     
-    def register_pin(self, pin_number: int, name: str = None, bias: str = 'pull_up') -> bool:
+    def register_pin(self, pin_number: int, name: str = None, direction: str = 'input' ,bias: str = '') -> bool:
         """
         Register a GPIO pin for monitoring using lgpio
         
@@ -76,12 +67,17 @@ class IOController:
                     pass  # Pin wasn't claimed, which is fine
                 
                 # Configure pin based on bias using lgpio
+                bias_flag = lgpio.SET_PULL_NONE
                 if bias == 'pull_up':
-                    lgpio.gpio_claim_input(self.gpio_handle, pin_number, lgpio.SET_PULL_UP)
+                    bias_flag = lgpio.SET_PULL_UP
                 elif bias == 'pull_down':
-                    lgpio.gpio_claim_input(self.gpio_handle, pin_number, lgpio.SET_PULL_DOWN)
-                else:  # floating
-                    lgpio.gpio_claim_input(self.gpio_handle, pin_number, lgpio.SET_PULL_NONE)
+                    bias_flag = lgpio.SET_PULL_DOWN
+
+                # Pin directionality
+                if direction == 'output':
+                    lgpio.gpio_claim_output(self.gpio_handle, pin_number, bias_flag)
+                else:
+                    lgpio.gpio_claim_input(self.gpio_handle, pin_number, bias_flag)
                 
                 # Read initial state
                 initial_state = lgpio.gpio_read(self.gpio_handle, pin_number)
@@ -90,6 +86,7 @@ class IOController:
                 self.registered_pins[pin_number] = {
                     'name': name or f'Pin {pin_number}',
                     'bias': bias,
+                    'direction': direction,
                     'state': initial_state,
                     'last_changed': time.time(),
                     'previous_state': initial_state
@@ -98,7 +95,7 @@ class IOController:
                 print(f"IOController: Registered pin {pin_number} ({name}) with {bias} bias, initial state: {initial_state}")
                 
                 # Start monitoring thread if not already running
-                if not self.gpio_thread_running:
+                if not self.gpio_thread_running and direction == 'input':
                     self._start_gpio_monitoring()
                 
                 # Dispatch initial pin state event
@@ -113,6 +110,31 @@ class IOController:
                 
         except Exception as e:
             print(f"IOController: Error registering pin {pin_number}: {e}")
+            return False
+        
+    def write_pin(self, pin_number: int, value: int) -> bool:
+        """
+        Write a value to a GPIO pin
+        
+        Args:
+            pin_number: GPIO pin number (BCM numbering)
+            value: 0 or 1 for output pins
+        """
+        if not self.gpio_initialized or self.gpio_handle is None:
+            print("IOController: GPIO not initialized")
+            return False
+        
+        try:
+            with self.gpio_lock:
+                if pin_number in self.registered_pins and self.registered_pins[pin_number]['direction'] == 'output':
+                    lgpio.gpio_write(self.gpio_handle, pin_number, value)
+                    print(f"IOController: Wrote {value} to pin {pin_number}")
+                    return True
+                else:
+                    print(f"IOController: Pin {pin_number} is not registered as output")
+                    return False
+        except Exception as e:
+            print(f"IOController: Error writing to pin {pin_number}: {e}")
             return False
     
     def _start_gpio_monitoring(self):
@@ -213,108 +235,6 @@ class IOController:
             except Exception as e:
                 print(f"IOController: Error in event callback {callback.__name__}: {e}")
     
-    # Camera detection methods (moved from YawController)
-    def start_detection(self) -> bool:
-        """Start the person detection system"""
-        try:
-            if not self.person_detector:
-                self.person_detector = PersonDetectionMultiprocess(self.buffer_name)
-            
-            if self.person_detector.start_detection():
-                print("IOController: Detection started successfully")
-                return True
-            else:
-                print("IOController: Failed to start detection")
-                return False
-                
-        except Exception as e:
-            print(f"IOController: Error starting detection: {e}")
-            return False
-    
-    def stop_detection(self) -> bool:
-        """Stop the person detection system"""
-        try:
-            if self.person_detector and self.person_detector.stop_detection():
-                print("IOController: Detection stopped successfully")
-                return True
-            else:
-                print("IOController: Failed to stop detection or not running")
-                return False
-                
-        except Exception as e:
-            print(f"IOController: Error stopping detection: {e}")
-            return False
-    
-    def get_detection_stats(self) -> Dict[str, Any]:
-        """Get detection statistics"""
-        if not self.person_detector:
-            return {
-                'person_count': 0,
-                'unique_people': 0,
-                'last_update': 0,
-                'fps': 0,
-                'detections': []
-            }
-        
-        # Get base stats from detector
-        stats = self.person_detector.get_detection_stats()
-        
-        # Update unique people count
-        detections = stats.get('detections', [])
-        for detection in detections:
-            track_id = detection.get('track_id', 0)
-            if track_id > 0:
-                self.unique_people_seen.add(track_id)
-        
-        # Add IOController specific stats
-        stats.update({
-            'unique_people': len(self.unique_people_seen)
-        })
-        
-        # Dispatch detection event if there are detections
-        if detections:
-            event_data = {
-                'detections': detections,
-                'person_count': stats.get('person_count', 0),
-                'unique_people': len(self.unique_people_seen)
-            }
-            
-            # Include movement parameters if available
-            if 'movement_direction' in stats:
-                event_data['movement_direction'] = stats['movement_direction']
-            if 'normalized_speed' in stats:
-                event_data['normalized_speed'] = stats['normalized_speed']
-            if 'tracked_person_id' in stats:
-                event_data['tracked_person_id'] = stats['tracked_person_id']
-            
-            self.dispatch_event('person_detected', event_data)
-        
-        return stats
-    
-    def get_latest_frame(self):
-        """Get the latest frame from detection system"""
-        if self.person_detector:
-            return self.person_detector.get_latest_frame()
-        return None
-    
-    def is_detection_running(self) -> bool:
-        """Check if detection is running"""
-        if self.person_detector:
-            return self.person_detector.is_running()
-        return False
-    
-    def restart_detection(self) -> bool:
-        """Restart the detection system"""
-        if self.person_detector:
-            return self.person_detector.restart_detection()
-        return False
-    
-    def get_process_info(self) -> Dict:
-        """Get detection process information"""
-        if self.person_detector:
-            return self.person_detector.get_process_info()
-        return {'status': 'not_initialized'}
-    
     def shutdown(self):
         """Shutdown the IOController and cleanup resources"""
         print("IOController: Shutting down...")
@@ -333,10 +253,6 @@ class IOController:
                 print("IOController: GPIO cleaned up")
             except Exception as e:
                 print(f"IOController: Error cleaning up GPIO: {e}")
-        
-        # Stop detection
-        if self.person_detector:
-            self.person_detector.shutdown()
         
         print("IOController: Shutdown complete")
     

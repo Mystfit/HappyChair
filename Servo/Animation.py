@@ -449,6 +449,11 @@ class AnimationLayer(object):
         return (not self._is_playing and 
                 self.current_frame + 1 >= self.current_animation.frames() and
                 self._current_post_delay_frame_count >= self._post_delay_frames)
+        
+    @property
+    def is_blending_out(self):
+        """Check if this layer is currently blending out"""
+        return self._blending_out
     
     def update(self, delta: timedelta = None, framerate=60):
         if not self._is_playing:

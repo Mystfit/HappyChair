@@ -4,6 +4,7 @@ import PowerPanel from './components/PowerPanel';
 import LayersPanel from './components/LayersPanel';
 import PlaylistsPanel from './components/PlaylistsPanel';
 import IOPanel from './components/IOPanel';
+import CameraPanel from './components/CameraPanel';
 import StatusIndicator from './components/StatusIndicator';
 
 function App() {
@@ -262,7 +263,13 @@ function App() {
             className={activeTab === 'camera' ? 'active' : ''} 
             onClick={() => setActiveTab('camera')}
           >
-            IO
+            Camera
+          </button>
+          <button 
+            className={activeTab === 'io' ? 'active' : ''} 
+            onClick={() => setActiveTab('io')}
+          >
+            GPIO & Motor
           </button>
         </div>
         
@@ -298,6 +305,12 @@ function App() {
           )}
           
           {activeTab === 'camera' && (
+            <CameraPanel 
+              onStatusUpdate={setStatus}
+            />
+          )}
+          
+          {activeTab === 'io' && (
             <IOPanel 
               onStatusUpdate={setStatus}
             />

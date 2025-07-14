@@ -9,6 +9,7 @@ from geventwebsocket.handler import WebSocketHandler
 from Servo.Animation import Animation, AnimationPlayer, AnimationLayer, Playlist
 from pathlib import Path
 from io_controller import IOController
+from camera_controller import CameraController
 from yaw_controller import YawController
 import cv2
 import numpy as np
@@ -27,6 +28,8 @@ def shutdown(signum, frame):
         yaw_controller.shutdown()
     if io_controller:
         io_controller.shutdown()
+    if camera_controller:
+        camera_controller.shutdown()
     sys.exit()
 
 def get_animation_paths(folder_path):
@@ -78,12 +81,16 @@ CORS(app)  # Enable CORS for all routes
 # Set up socketIO runner for flask app
 sock = Sock(app)
 
-# Initialize IOController and YawController
+# Initialize IOController to handle GPIO only
 io_controller = IOController()
-io_controller.register_pin(14, "seat sensor", "pull_up")
+io_controller.register_pin(14, "seatsensor", "input", "pull_up")
+io_controller.register_pin(15, "spinclutch", "output")
 
+# Initialize CameraController to handle camera detection
+camera_controller = CameraController()
 
-yaw_controller = None
+# Initialize YawController with DRV8825 PWM multiprocess driver to control chair base rotation
+yaw_controller = YawController(motor_type="drv8825_pwm_multiprocess")
 
 current_layer = None
 # Load all animations but don't create layers for them
@@ -343,20 +350,16 @@ def api_set_playlist_transport():
         'playlist_name': playlist_name
     })
 
-# Camera API Endpoints (now using IOController)
+# Camera API Endpoints (now using CameraController)
 @app.route('/api/camera/start', methods=['POST'])
 def api_start_camera():
-    global io_controller, yaw_controller
+    global camera_controller
     try:
-        if not yaw_controller:
-            yaw_controller = YawController(io_controller, motor_type="drv8825_pwm_multiprocess")
-            yaw_controller.start_tracking()
-        
-        if io_controller.start_detection():
+        if camera_controller.start_detection():
             return jsonify({
                 'success': True,
-                'message': 'Camera started successfully (IOController mode)',
-                'process_info': io_controller.get_process_info()
+                'message': 'Camera started successfully',
+                'process_info': camera_controller.get_process_info()
             })
         else:
             return jsonify({
@@ -371,9 +374,9 @@ def api_start_camera():
 
 @app.route('/api/camera/stop', methods=['POST'])
 def api_stop_camera():
-    global io_controller
+    global camera_controller
     try:
-        if io_controller and io_controller.stop_detection():
+        if camera_controller and camera_controller.stop_detection():
             return jsonify({
                 'success': True,
                 'message': 'Camera stopped successfully'
@@ -391,21 +394,19 @@ def api_stop_camera():
 
 @app.route('/api/camera/status', methods=['GET'])
 def api_camera_status():
-    global io_controller, yaw_controller
+    global camera_controller, yaw_controller
     try:
-        if io_controller:
-            detection_stats = io_controller.get_detection_stats()
+        if camera_controller:
+            detection_stats = camera_controller.get_detection_stats()
             motor_stats = yaw_controller.get_motor_stats() if yaw_controller else {}
-            pin_states = io_controller.get_pin_states()
             
             # Combine stats
             stats = {**detection_stats, **motor_stats}
             
             return jsonify({
                 'success': True,
-                'running': io_controller.is_detection_running(),
-                'stats': stats,
-                'gpio_pins': pin_states
+                'running': camera_controller.is_detection_running(),
+                'stats': stats
             })
         else:
             return jsonify({
@@ -420,8 +421,7 @@ def api_camera_status():
                     'motor_direction': 'stopped',
                     'motor_speed': 0.0,
                     'tracking_enabled': False
-                },
-                'gpio_pins': {}
+                }
             })
     except Exception as e:
         return jsonify({
@@ -431,14 +431,14 @@ def api_camera_status():
 
 @app.route('/api/camera/restart', methods=['POST'])
 def api_restart_camera():
-    global io_controller
+    global camera_controller
     try:
-        if io_controller:
-            if io_controller.restart_detection():
+        if camera_controller:
+            if camera_controller.restart_detection():
                 return jsonify({
                     'success': True,
                     'message': 'Camera restarted successfully',
-                    'process_info': io_controller.get_process_info()
+                    'process_info': camera_controller.get_process_info()
                 })
             else:
                 return jsonify({
@@ -458,13 +458,13 @@ def api_restart_camera():
 
 @app.route('/api/camera/process-info', methods=['GET'])
 def api_camera_process_info():
-    global io_controller
+    global camera_controller
     try:
-        if io_controller:
+        if camera_controller:
             return jsonify({
                 'success': True,
-                'process_info': io_controller.get_process_info(),
-                'running': io_controller.is_detection_running()
+                'process_info': camera_controller.get_process_info(),
+                'running': camera_controller.is_detection_running()
             })
         else:
             return jsonify({
@@ -480,7 +480,7 @@ def api_camera_process_info():
 
 @app.route('/api/camera/stream')
 def api_camera_stream():
-    global io_controller
+    global camera_controller
     
     def generate_frames():
         last_frame_time = time.time()
@@ -490,8 +490,8 @@ def api_camera_stream():
             try:
                 current_time = time.time()
                 
-                if io_controller and io_controller.is_detection_running():
-                    frame = io_controller.get_latest_frame()
+                if camera_controller and camera_controller.is_detection_running():
+                    frame = camera_controller.get_latest_frame()
                     if frame is not None:
                         # Encode frame as JPEG with optimized quality
                         encode_params = [
@@ -521,7 +521,7 @@ def api_camera_stream():
                     blank_frame = np.zeros((480, 640, 3), dtype=np.uint8)
                     cv2.putText(blank_frame, "Camera Not Active", (200, 240), 
                               cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
-                    cv2.putText(blank_frame, "IOController Mode", (180, 280), 
+                    cv2.putText(blank_frame, "CameraController Mode", (180, 280), 
                               cv2.FONT_HERSHEY_SIMPLEX, 0.7, (128, 128, 128), 1)
                     
                     _, buffer = cv2.imencode('.jpg', blank_frame)
@@ -643,7 +643,7 @@ def api_yaw_status():
 # WebSocket routes
 @sock.route('/api/ws/status')
 def animation_status(ws):
-    global player, io_controller, yaw_controller
+    global player, io_controller, camera_controller, yaw_controller
     try:
         # Check if the WebSocket is still connected
         while ws.connected:
@@ -654,14 +654,16 @@ def animation_status(ws):
             # Get active animations directly from the player
             active_animations = player.get_active_layers()
             
-            # Get IO controller data
+            # Get controller data
             gpio_pins = {}
             camera_stats = {}
             motor_stats = {}
             
             if io_controller:
                 gpio_pins = io_controller.get_pin_states()
-                camera_stats = io_controller.get_detection_stats()
+            
+            if camera_controller:
+                camera_stats = camera_controller.get_detection_stats()
             
             if yaw_controller:
                 motor_stats = yaw_controller.get_motor_stats()
