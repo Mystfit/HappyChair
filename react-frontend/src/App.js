@@ -7,6 +7,7 @@ import IOPanel from './components/IOPanel';
 import CameraPanel from './components/CameraPanel';
 import BehaviourPanel from './components/BehaviourPanel';
 import StatusIndicator from './components/StatusIndicator';
+import { WebSocketProvider } from './contexts/WebSocketContext';
 
 function App() {
   const [activeTab, setActiveTab] = useState('transport');
@@ -231,108 +232,110 @@ function App() {
   };
 
   return (
-    <div className="container">
-      <h1>Animation Controller</h1>
-      
-      <div className="tabs">
-        <div className="tab-buttons">
-          <button 
-            className={activeTab === 'transport' ? 'active' : ''} 
-            onClick={() => setActiveTab('transport')}
-          >
-            Transport
-          </button>
-          <button 
-            className={activeTab === 'power' ? 'active' : ''} 
-            onClick={() => setActiveTab('power')}
-          >
-            Power
-          </button>
-          <button 
-            className={activeTab === 'layers' ? 'active' : ''} 
-            onClick={() => setActiveTab('layers')}
-          >
-            Layers
-          </button>
-          <button 
-            className={activeTab === 'playlists' ? 'active' : ''} 
-            onClick={() => setActiveTab('playlists')}
-          >
-            Playlists
-          </button>
-          <button 
-            className={activeTab === 'camera' ? 'active' : ''} 
-            onClick={() => setActiveTab('camera')}
-          >
-            Camera
-          </button>
-          <button 
-            className={activeTab === 'io' ? 'active' : ''} 
-            onClick={() => setActiveTab('io')}
-          >
-            GPIO & Motor
-          </button>
-          <button 
-            className={activeTab === 'behaviour' ? 'active' : ''} 
-            onClick={() => setActiveTab('behaviour')}
-          >
-            Behaviour
-          </button>
+    <WebSocketProvider>
+      <div className="container">
+        <h1>Animation Controller</h1>
+        
+        <div className="tabs">
+          <div className="tab-buttons">
+            <button 
+              className={activeTab === 'transport' ? 'active' : ''} 
+              onClick={() => setActiveTab('transport')}
+            >
+              Transport
+            </button>
+            <button 
+              className={activeTab === 'power' ? 'active' : ''} 
+              onClick={() => setActiveTab('power')}
+            >
+              Power
+            </button>
+            <button 
+              className={activeTab === 'layers' ? 'active' : ''} 
+              onClick={() => setActiveTab('layers')}
+            >
+              Layers
+            </button>
+            <button 
+              className={activeTab === 'playlists' ? 'active' : ''} 
+              onClick={() => setActiveTab('playlists')}
+            >
+              Playlists
+            </button>
+            <button 
+              className={activeTab === 'camera' ? 'active' : ''} 
+              onClick={() => setActiveTab('camera')}
+            >
+              Camera
+            </button>
+            <button 
+              className={activeTab === 'io' ? 'active' : ''} 
+              onClick={() => setActiveTab('io')}
+            >
+              GPIO & Motor
+            </button>
+            <button 
+              className={activeTab === 'behaviour' ? 'active' : ''} 
+              onClick={() => setActiveTab('behaviour')}
+            >
+              Behaviour
+            </button>
+          </div>
+          
+          <div className="tab-content">
+            {activeTab === 'transport' && (
+              <TransportPanel 
+                transportPlaying={transportPlaying}
+                globalFramerate={globalFramerate}
+                animationMode={animationMode}
+                onTransportAction={handleTransportAction}
+              />
+            )}
+            
+            {activeTab === 'power' && (
+              <PowerPanel onPowerOff={handlePowerOff} />
+            )}
+            
+            {activeTab === 'layers' && (
+              <LayersPanel 
+                animations={animations}
+                onPlayAnimation={handlePlayAnimation}
+                onUploadAnimation={(file) => handleFileUpload('animation', file)}
+              />
+            )}
+            
+            {activeTab === 'playlists' && (
+              <PlaylistsPanel 
+                playlists={playlists}
+                playlistTransportPlaying={playlistTransportPlaying}
+                onPlaylistAction={handlePlaylistAction}
+                onUploadPlaylist={(file) => handleFileUpload('playlist', file)}
+              />
+            )}
+            
+            {activeTab === 'camera' && (
+              <CameraPanel 
+                onStatusUpdate={setStatus}
+              />
+            )}
+            
+            {activeTab === 'io' && (
+              <IOPanel 
+                onStatusUpdate={setStatus}
+              />
+            )}
+            
+            {activeTab === 'behaviour' && (
+              <BehaviourPanel 
+                onStatusUpdate={setStatus}
+              />
+            )}
+          </div>
         </div>
         
-        <div className="tab-content">
-          {activeTab === 'transport' && (
-            <TransportPanel 
-              transportPlaying={transportPlaying}
-              globalFramerate={globalFramerate}
-              animationMode={animationMode}
-              onTransportAction={handleTransportAction}
-            />
-          )}
-          
-          {activeTab === 'power' && (
-            <PowerPanel onPowerOff={handlePowerOff} />
-          )}
-          
-          {activeTab === 'layers' && (
-            <LayersPanel 
-              animations={animations}
-              onPlayAnimation={handlePlayAnimation}
-              onUploadAnimation={(file) => handleFileUpload('animation', file)}
-            />
-          )}
-          
-          {activeTab === 'playlists' && (
-            <PlaylistsPanel 
-              playlists={playlists}
-              playlistTransportPlaying={playlistTransportPlaying}
-              onPlaylistAction={handlePlaylistAction}
-              onUploadPlaylist={(file) => handleFileUpload('playlist', file)}
-            />
-          )}
-          
-          {activeTab === 'camera' && (
-            <CameraPanel 
-              onStatusUpdate={setStatus}
-            />
-          )}
-          
-          {activeTab === 'io' && (
-            <IOPanel 
-              onStatusUpdate={setStatus}
-            />
-          )}
-          
-          {activeTab === 'behaviour' && (
-            <BehaviourPanel 
-              onStatusUpdate={setStatus}
-            />
-          )}
-        </div>
+        <StatusIndicator type={status.type} message={status.message} />
       </div>
-      
-      <StatusIndicator type={status.type} message={status.message} />
-    </div>
+    </WebSocketProvider>
   );
 }
 

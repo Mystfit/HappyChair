@@ -1,40 +1,24 @@
 import React, { useState, useEffect } from 'react';
+import { useWebSocket } from '../contexts/WebSocketContext';
+import { AnsiUp } from 'ansi_up/ansi_up.js'
+
+const ansi_up = new AnsiUp();
 
 function BehaviourPanel({ onStatusUpdate }) {
-  const [treeStatus, setTreeStatus] = useState({ 
-    nodes: [], 
-    currently_running: [], 
-    changed: false, 
-    tree_running: false 
-  });
-  const [blackboardData, setBlackboardData] = useState({});
   const [treeRunning, setTreeRunning] = useState(false);
-  const [dotGraph, setDotGraph] = useState('');
 
-  // Fetch tree status periodically
+  // Use WebSocket context for real-time updates
+  const { data: wsData, isConnected, connectionError } = useWebSocket();
+  const treeStatus = wsData.behaviour_status || { nodes: [], currently_running: [], changed: false, tree_running: false };
+  const blackboardData = wsData.blackboard_data || {};
+  const asciiGraph = wsData.graph_data || '';
+
+  // Update local tree running state when websocket data changes
   useEffect(() => {
-    const fetchTreeStatus = async () => {
-      try {
-        const response = await fetch('/api/behaviour/status');
-        const data = await response.json();
-        if (data.success) {
-          setTreeStatus(data.status);
-          setBlackboardData(data.blackboard || {});
-          setTreeRunning(data.running);
-        }
-      } catch (error) {
-        console.error('Failed to fetch tree status:', error);
-      }
-    };
-
-    // Initial fetch
-    fetchTreeStatus();
-
-    // Set up polling every 500ms
-    const interval = setInterval(fetchTreeStatus, 500);
-
-    return () => clearInterval(interval);
-  }, []);
+    if (treeStatus.tree_running !== undefined) {
+      setTreeRunning(treeStatus.tree_running);
+    }
+  }, [treeStatus.tree_running]);
 
   const startTree = async () => {
     try {
@@ -66,19 +50,6 @@ function BehaviourPanel({ onStatusUpdate }) {
     }
   };
 
-  const fetchDotGraph = async () => {
-    try {
-      const response = await fetch('/api/behaviour/graph');
-      const data = await response.json();
-      if (data.success) {
-        setDotGraph(data.dot_graph);
-      } else {
-        onStatusUpdate({ type: 'error', message: data.error || 'Failed to fetch dot graph' });
-      }
-    } catch (error) {
-      onStatusUpdate({ type: 'error', message: `Failed to fetch dot graph: ${error.message}` });
-    }
-  };
 
   const getStatusColor = (status) => {
     switch (status) {
@@ -149,79 +120,8 @@ function BehaviourPanel({ onStatusUpdate }) {
           </span>
         </div>
         
-        <button 
-          onClick={fetchDotGraph}
-          style={{
-            padding: '6px 12px',
-            backgroundColor: '#17a2b8',
-            color: 'white',
-            border: 'none',
-            borderRadius: '4px',
-            cursor: 'pointer'
-          }}
-        >
-          Generate ASCII Graph
-        </button>
       </div>
 
-      {/* Tree Nodes Visualization */}
-      <div className="tree-visualization" style={{ marginBottom: '20px' }}>
-        <h4>Current Tree State</h4>
-        <div className="tree-nodes" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          {treeStatus.nodes && treeStatus.nodes.length > 0 ? (
-            treeStatus.nodes.map(node => (
-              <div 
-                key={node.id} 
-                className={`node ${node.status.toLowerCase()}`}
-                style={{
-                  padding: '10px',
-                  border: `2px solid ${getStatusColor(node.status)}`,
-                  borderRadius: '5px',
-                  backgroundColor: treeStatus.currently_running.includes(node.id) ? '#00465fff' : '#2d2d2dff'
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span 
-                    style={{ 
-                      fontSize: '16px', 
-                      color: getStatusColor(node.status),
-                      fontWeight: 'bold'
-                    }}
-                  >
-                    {getStatusIcon(node.status)}
-                  </span>
-                  <strong>{node.name}</strong>
-                  <span style={{ color: '#6c757d', fontSize: '12px' }}>({node.type})</span>
-                  {treeStatus.currently_running.includes(node.id) && (
-                    <span style={{ 
-                      backgroundColor: '#ffc107', 
-                      color: '#212529', 
-                      padding: '2px 6px', 
-                      borderRadius: '3px', 
-                      fontSize: '10px',
-                      fontWeight: 'bold'
-                    }}>
-                      ACTIVE
-                    </span>
-                  )}
-                </div>
-                <div style={{ marginTop: '4px' }}>
-                  <span style={{ fontWeight: 'bold' }}>Status:</span> {node.status}
-                </div>
-                {node.feedback && (
-                  <div style={{ marginTop: '4px', fontStyle: 'italic', color: '#6c757d' }}>
-                    {node.feedback}
-                  </div>
-                )}
-              </div>
-            ))
-          ) : (
-            <div style={{ padding: '20px', textAlign: 'center', color: '#6c757d' }}>
-              No tree nodes to display. Start the behaviour tree to see active nodes.
-            </div>
-          )}
-        </div>
-      </div>
 
       {/* Blackboard Data */}
       <div className="blackboard-data" style={{ marginBottom: '20px' }}>
@@ -246,21 +146,38 @@ function BehaviourPanel({ onStatusUpdate }) {
         </div>
       </div>
 
-      {/* Dot Graph Display */}
-      {dotGraph && (
-        <div className="dot-graph" style={{ marginBottom: '20px' }}>
-          <h4>Tree Structure (Dot Graph)</h4>
-          <pre style={{ 
-            backgroundColor: '#2d2d2dff', 
-            padding: '10px', 
-            border: '1px solid #dee2e6', 
-            borderRadius: '5px',
-            fontSize: '10px',
-            overflow: 'auto',
-            maxHeight: '300px'
-          }}>
-            {dotGraph}
-          </pre>
+      {/* ASCII Graph Display */}
+      {asciiGraph && (
+        <div className="ascii-graph" style={{ marginBottom: '20px' }}>
+          <h4>Tree Structure (ASCII Graph)</h4>
+          <pre 
+            style={{ 
+              backgroundColor: '#2d2d2dff', 
+              padding: '10px', 
+              border: '1px solid #dee2e6', 
+              borderRadius: '5px',
+              fontSize: '10px',
+              overflow: 'auto',
+              maxHeight: '300px'
+            }}
+            dangerouslySetInnerHTML={{
+              __html: ansi_up.ansi_to_html(asciiGraph)
+            }}
+          />
+        </div>
+      )}
+
+      {/* WebSocket Connection Status */}
+      {!isConnected && (
+        <div style={{ 
+          padding: '10px', 
+          backgroundColor: '#dc3545', 
+          color: 'white', 
+          borderRadius: '5px',
+          marginBottom: '20px'
+        }}>
+          WebSocket disconnected. Real-time updates unavailable.
+          {connectionError && <div>Error: {connectionError}</div>}
         </div>
       )}
     </div>

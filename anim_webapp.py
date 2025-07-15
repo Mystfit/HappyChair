@@ -698,8 +698,8 @@ def api_behaviour_tree_graph():
     global chair_behaviour_tree
     try:
         if chair_behaviour_tree:
-            dot_graph = chair_behaviour_tree.generate_ascii_graph()
-            return jsonify({'success': True, 'dot_graph': dot_graph})
+            ascii_graph = chair_behaviour_tree.generate_ascii_graph()
+            return jsonify({'success': True, 'ascii_graph': ascii_graph})
         else:
             return jsonify({'success': False, 'error': 'Behaviour tree not initialized'}), 400
     except Exception as e:

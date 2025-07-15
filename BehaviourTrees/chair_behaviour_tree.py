@@ -6,6 +6,7 @@ Integrates with existing controllers using py_trees library.
 import py_trees
 from py_trees import common, composites, behaviours, decorators, blackboard
 import threading
+import operator
 import time
 from typing import Dict, Any, Optional, List
 import uuid
@@ -91,28 +92,41 @@ class PersonDetectionCheck(py_trees.behaviour.Behaviour):
         self.blackboard.register_key("tracked_person_info", common.Access.WRITE)
         self.blackboard.register_key("movement_direction", common.Access.WRITE)
         self.blackboard.register_key("normalized_speed", common.Access.WRITE)
+        self.blackboard.person_detected = False
+        self.blackboard.person_count = 0
+        self.blackboard.tracked_person_info = None
+        self.blackboard.movement_direction = "stopped"
+        self.blackboard.normalized_speed = 0.0
         
     def update(self):
         try:
             stats = self.camera_controller.get_detection_stats()
             person_count = stats.get('person_count', 0)
             person_id = stats.get('tracked_person_id', None)
-            detections = stats.get('detections', [])
+            # detections = stats.get('detections', [])
+            # list comprehension to extract tracked person from detections array
+            # tracked_person_info = [det for det in detections if det.get('track_id') == person_id]
             movement_direction = stats.get('movement_direction', None)
             normalized_speed = stats.get('normalized_speed', None)
             
-            self.blackboard.person_detected = person_count > 0
+            print(f"PersonDetectionCheck: Detected {person_count} persons, tracked ID: {person_id}")
+            
+            updated = person_id is not None
             self.blackboard.person_count = person_count
-            self.blackboard.tracked_person_info = detections[person_id] if person_id is not None and detections else None
+            self.blackboard.tracked_person_info = None
+            self.blackboard.person_detected = person_id is not None
             self.blackboard.movement_direction = movement_direction
             self.blackboard.normalized_speed = normalized_speed
             
-            if person_id:
-                self.feedback_message = f"Tracking person {person_id}"
+            if updated:
+                if person_id:
+                    self.feedback_message = f"Tracking person {person_id}"
+                else:
+                    self.feedback_message = "No person detected"
                 return common.Status.SUCCESS
-            else:
-                self.feedback_message = "No person detected"
-                return common.Status.FAILURE
+            
+            self.feedback_message = "No change in person detection"
+            return common.Status.RUNNING
         except Exception as e:
             self.feedback_message = f"Error in person detection: {str(e)}"
             return common.Status.FAILURE
@@ -127,6 +141,7 @@ class SeatSensorCheck(py_trees.behaviour.Behaviour):
         self.pin = pin
         self.blackboard = self.attach_blackboard_client(name="GPIO")
         self.blackboard.register_key("seat_occupied", common.Access.WRITE)
+        self.blackboard.seat_occupied = False
         
     def update(self):
         try:
@@ -140,14 +155,19 @@ class SeatSensorCheck(py_trees.behaviour.Behaviour):
             
             # Assuming pull-up configuration: 0 = occupied, 1 = not occupied
             occupied = seat_sensor_state == 0
-            self.blackboard.seat_occupied = occupied
             
-            if occupied:
-                self.feedback_message = "Seat is occupied"
+            updated = occupied != self.blackboard.seat_occupied
+            self.blackboard.seat_occupied = occupied
+            if updated:            
+                if occupied:
+                    self.feedback_message = "Seat is occupied"
+                else:
+                    self.feedback_message = "Seat is not occupied"
                 return common.Status.SUCCESS
-            else:
-                self.feedback_message = "Seat is not occupied"
-                return common.Status.FAILURE
+            
+            # self.feedback_message = "No change in seat sensor state"
+            return common.Status.RUNNING
+        
         except Exception as e:
             self.feedback_message = f"Error reading seat sensor: {str(e)}"
             return common.Status.FAILURE
@@ -207,8 +227,7 @@ class TrackToFacePersonAction(py_trees.behaviour.Behaviour):
             self.yaw_controller.stop_motor()
         except Exception as e:
             self.logger.error(f"Error stopping yaw control: {str(e)}")
-
-
+    
 class ChairBehaviourTree:
     """Main behaviour tree class for the HappyChair system."""
     
@@ -219,14 +238,22 @@ class ChairBehaviourTree:
         self.camera_controller = camera_controller
         self.io_controller = io_controller
         
-        # Create blackboard for shared data between behaviours
-        self.blackboard = blackboard.Client(name="ChairBehaviourTree")
-        
         # Build the behavior tree
         self.root = self._create_tree()
         
         # Create the BehaviourTree wrapper
         self.tree = py_trees.trees.BehaviourTree(root=self.root)
+        
+        # Create blackboard for shared data between behaviours
+        self.blackboard = blackboard.Client(name="ChairBehaviourTree")
+        self.blackboard.register_key(key="seat_occupied", access=common.Access.READ)
+        self.blackboard.register_key(key="person_detected", access=common.Access.READ)
+        self.blackboard.register_key(key="current_animation", access=common.Access.READ)
+        self.blackboard.register_key(key="person_count", access=common.Access.READ)
+        self.blackboard.register_key(key="tracked_person_info", access=common.Access.READ)
+        self.blackboard.register_key(key="movement_direction", access=common.Access.READ)
+        self.blackboard.register_key(key="normalized_speed", access=common.Access.READ)
+        print(self.blackboard)
         
         # Add visitors for monitoring
         self.snapshot_visitor = py_trees.visitors.SnapshotVisitor()
@@ -244,15 +271,7 @@ class ChairBehaviourTree:
         # Create root selector - chooses between different high-level behaviors
         root = composites.Parallel(name="Chair Root", policy=py_trees.common.ParallelPolicy.SuccessOnOne())
         # root = composites.Selector(name="Chair Root", memory=False)
-        
-        # # Add basic idle behavior as fallback
-        # idle_sequence = composites.Sequence(name="Idle Sequence", memory=True)
-        # idle_sequence.add_children([
-        #     behaviours.Success(name="Idle Success")
-        # ])
-        
-        # root.add_child(idle_sequence)
-        
+
         # Test basic sensor blackboard reads
         seat_sensor_check = SeatSensorCheck(
             name="Seat Sensor Check",
@@ -264,11 +283,60 @@ class ChairBehaviourTree:
             name="Person Detection Check",
             camera_controller=self.camera_controller
         )
-
-        root.add_children([
+        
+        blackboard_populate = composites.Parallel(name="Interrupts", policy=py_trees.common.ParallelPolicy.SuccessOnAll())
+        blackboard_populate.add_children([
             seat_sensor_check,
             person_detection_check
         ])
+        
+        # Tree to handle when no-one is sitting on the chair
+        scan = py_trees.composites.Sequence(name="Scan", memory=True)
+        is_scan_requested = behaviours.CheckBlackboardVariableValue(
+            name="Seat empty?",
+            check=common.ComparisonExpression(
+                variable="seat_occupied", value=False, operator=operator.eq
+            )
+        )
+        
+        scan_handle_states = py_trees.composites.Selector(name="Searching for person", memory=True)
+        
+        person_detected = behaviours.CheckBlackboardVariableValue(
+            name="Person detected?",
+            check=common.ComparisonExpression(
+                variable="person_detected", value=True, operator=operator.eq
+            )
+        )
+        scan_handle_states.add_children([
+            person_detected,
+            behaviours.Success(name="Placeholder: Rotate chair to face person"),
+        ])
+        
+        scan.add_children([
+            is_scan_requested,
+            scan_handle_states
+        ])
+
+        # Add basic idle behavior as fallback
+        idle_sequence = composites.Sequence(name="Idle Sequence", memory=True)
+        idle_sequence.add_children([
+            behaviours.Success(name="Idle Success")
+        ])
+        
+        # Add blackboard populators
+        root.add_children([
+            blackboard_populate
+        ])
+             
+        # Create a selector to handle interrupts for when a person sits on the chair or approaches close enough
+        # This will handle 3 behaviour states
+        # - Search for a person by rotating the chair and pausing when we're facing a person
+        # - Play an animation when a person is close enough or return to searching if they move far enough away
+        # - Wait for a person to sit down and then switch to the sitting tree
+        top_selector = py_trees.composites.Selector(name="Selector", memory=False)
+        top_selector.add_children([scan, idle_sequence])
+        
+        root.add_child(top_selector)
         
         return root
     
@@ -383,7 +451,7 @@ class ChairBehaviourTree:
     def generate_ascii_graph(self) -> str:
         """Generate dot graph representation using py_trees utilities."""
         try:
-            return py_trees.display.unicode_tree(self.root)
+            return py_trees.display.unicode_tree(self.root, show_status=True)
         except Exception as e:
             print(f"ChairBehaviourTree: Error generating dot graph: {e}")
             return ""
@@ -392,14 +460,14 @@ class ChairBehaviourTree:
         """Get current blackboard data."""
         try:
             return {
-                'person_detected': getattr(self.blackboard, 'person_detected', False),
-                'seat_occupied': getattr(self.blackboard, 'seat_occupied', False),
-                'current_animation': getattr(self.blackboard, 'current_animation', None),
-                'person_count': getattr(self.blackboard, 'person_count', 0),
-                'tracked_person_info': getattr(self.blackboard, 'tracked_person_info', None),
-                'movement_direction': getattr(self.blackboard, 'movement_direction', None),
-                'normalized_speed': getattr(self.blackboard, 'normalized_speed', None),
-                'seat_occupied': getattr(self.blackboard, 'seat_occupied', False)
+                'person_detected': self.blackboard.person_detected if self.blackboard.exists('person_detected') else False,
+                'seat_occupied': self.blackboard.seat_occupied if self.blackboard.exists('seat_occupied') else False,
+                'current_animation': self.blackboard.current_animation if self.blackboard.exists('current_animation') else None,
+                'person_count': self.blackboard.person_count if self.blackboard.exists('person_count') else 0,
+                'tracked_person_info': self.blackboard.tracked_person_info if self.blackboard.exists('tracked_person_info') else None,
+                'movement_direction': self.blackboard.movement_direction if self.blackboard.exists('movement_direction') else None,
+                'normalized_speed': self.blackboard.normalized_speed if self.blackboard.exists('normalized_speed') else None,
+                'seat_occupied': self.blackboard.seat_occupied if self.blackboard.exists('seat_occupied') else False
             }
         except Exception as e:
             print(f"ChairBehaviourTree: Error getting blackboard data: {e}")

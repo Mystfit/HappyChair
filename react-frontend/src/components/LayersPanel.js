@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { useWebSocket } from '../contexts/WebSocketContext';
 
 function LayersPanel({ animations, onPlayAnimation, onUploadAnimation }) {
   // Original state
@@ -10,81 +11,14 @@ function LayersPanel({ animations, onPlayAnimation, onUploadAnimation }) {
   const [layerMode, setLayerMode] = useState('dynamic'); // 'dynamic' or 'static'
   const [layers, setLayers] = useState([]);
   const [selectedLayerId, setSelectedLayerId] = useState(null);
-  const [layerStatus, setLayerStatus] = useState([]); // Initialize as an empty array, not an object
   const [nextLayerId, setNextLayerId] = useState(1);
+  
+  // Use WebSocket context for real-time updates
+  const { data: wsData, isConnected, connectionError } = useWebSocket();
+  const layerStatus = wsData.active_animations || [];
   
   // Base layer initialization has been removed to prevent automatic creation
   // This ensures only animation layers created by button clicks will be displayed
-  
-  // Connect to WebSocket for real-time updates
-  useEffect(() => {
-    let ws = null;
-    let reconnectTimer = null;
-    
-    const connectWebSocket = () => {
-      try {
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        ws = new WebSocket(`${protocol}//${window.location.host}/api/ws/status`);
-        
-        ws.onopen = () => {
-          console.log('WebSocket connected');
-          // Clear any reconnect timer if connection is successful
-          if (reconnectTimer) {
-            clearTimeout(reconnectTimer);
-            reconnectTimer = null;
-          }
-        };
-        
-        ws.onmessage = (event) => {
-          try {
-            const data = JSON.parse(event.data);
-            // Update layer status with animation weights and frame positions
-            if (data && data.active_animations) {
-              setLayerStatus(data.active_animations);
-            }
-          } catch (error) {
-            console.error('WebSocket parse error:', error);
-          }
-        };
-        
-        ws.onerror = (error) => {
-          console.error('WebSocket error:', error);
-        };
-        
-        ws.onclose = () => {
-          console.log('WebSocket closed, attempting to reconnect...');
-          // Attempt to reconnect after a delay
-          if (!reconnectTimer) {
-            reconnectTimer = setTimeout(connectWebSocket, 3000);
-          }
-        };
-      } catch (error) {
-        console.error('WebSocket connection error:', error);
-        // Attempt to reconnect after a delay
-        if (!reconnectTimer) {
-          reconnectTimer = setTimeout(connectWebSocket, 3000);
-        }
-      }
-    };
-    
-    // Initial connection
-    connectWebSocket();
-    
-    // Cleanup function
-    return () => {
-      if (ws) {
-        // Close the WebSocket connection
-        if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
-          ws.close();
-        }
-      }
-      
-      // Clear any pending reconnect timer
-      if (reconnectTimer) {
-        clearTimeout(reconnectTimer);
-      }
-    };
-  }, []);
   
   // Track layers that are being removed for animation
   const [removingLayers, setRemovingLayers] = useState([]);

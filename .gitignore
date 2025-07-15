@@ -3,3 +3,5 @@ react-frontend/build/
 resources/
 .venv/
 .venv.bak/
+*.pyc
+*.log
