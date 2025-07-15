@@ -11,6 +11,7 @@ from pathlib import Path
 from io_controller import IOController
 from camera_controller import CameraController
 from yaw_controller import YawController
+from BehaviourTrees.chair_behaviour_tree import ChairBehaviourTree
 import cv2
 import numpy as np
 
@@ -24,6 +25,8 @@ playlists = {}
 animation_controller = ServoAnimationController()
 
 def shutdown(signum, frame):
+    if chair_behaviour_tree:
+        chair_behaviour_tree.shutdown()
     if yaw_controller:
         yaw_controller.shutdown()
     if io_controller:
@@ -91,6 +94,9 @@ camera_controller = CameraController()
 
 # Initialize YawController with DRV8825 PWM multiprocess driver to control chair base rotation
 yaw_controller = YawController(motor_type="drv8825_pwm_multiprocess")
+
+# Initialize ChairBehaviourTree with all controllers
+chair_behaviour_tree = None
 
 current_layer = None
 # Load all animations but don't create layers for them
@@ -640,10 +646,70 @@ def api_yaw_status():
         }), 500
 
 
+# Behaviour Tree API Endpoints
+@app.route('/api/behaviour/start', methods=['POST'])
+def api_start_behaviour_tree():
+    global chair_behaviour_tree
+    try:
+        if chair_behaviour_tree and chair_behaviour_tree.start():
+            return jsonify({'success': True, 'message': 'Behaviour tree started'})
+        else:
+            return jsonify({'success': False, 'error': 'Failed to start behaviour tree'}), 500
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/behaviour/stop', methods=['POST'])
+def api_stop_behaviour_tree():
+    global chair_behaviour_tree
+    try:
+        if chair_behaviour_tree:
+            chair_behaviour_tree.stop()
+            return jsonify({'success': True, 'message': 'Behaviour tree stopped'})
+        else:
+            return jsonify({'success': False, 'error': 'Behaviour tree not initialized'}), 400
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/behaviour/status', methods=['GET'])
+def api_behaviour_tree_status():
+    global chair_behaviour_tree
+    try:
+        if chair_behaviour_tree:
+            status = chair_behaviour_tree.get_tree_status()
+            blackboard_data = chair_behaviour_tree.get_blackboard_data()
+            return jsonify({
+                'success': True, 
+                'status': status,
+                'blackboard': blackboard_data,
+                'running': chair_behaviour_tree.is_running()
+            })
+        else:
+            return jsonify({
+                'success': True,
+                'status': {'nodes': [], 'currently_running': [], 'changed': False, 'tree_running': False},
+                'blackboard': {},
+                'running': False
+            })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/behaviour/graph', methods=['GET'])
+def api_behaviour_tree_graph():
+    global chair_behaviour_tree
+    try:
+        if chair_behaviour_tree:
+            dot_graph = chair_behaviour_tree.generate_ascii_graph()
+            return jsonify({'success': True, 'dot_graph': dot_graph})
+        else:
+            return jsonify({'success': False, 'error': 'Behaviour tree not initialized'}), 400
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 # WebSocket routes
 @sock.route('/api/ws/status')
 def animation_status(ws):
-    global animation_controller, io_controller, camera_controller, yaw_controller
+    global animation_controller, io_controller, camera_controller, yaw_controller, chair_behaviour_tree
     try:
         # Check if the WebSocket is still connected
         while ws.connected:
@@ -658,6 +724,9 @@ def animation_status(ws):
             gpio_pins = {}
             camera_stats = {}
             motor_stats = {}
+            behaviour_status = {}
+            blackboard_data = {}
+            graph_data = {}
             
             if io_controller:
                 gpio_pins = io_controller.get_pin_states()
@@ -668,6 +737,11 @@ def animation_status(ws):
             if yaw_controller:
                 motor_stats = yaw_controller.get_motor_stats()
             
+            if chair_behaviour_tree:
+                behaviour_status = chair_behaviour_tree.get_tree_status()
+                blackboard_data = chair_behaviour_tree.get_blackboard_data()
+                graph_data = chair_behaviour_tree.generate_ascii_graph()
+                      
             # Debug print
             # print(f"Active animations: {len(active_animations)}")
             # for anim in active_animations:
@@ -680,7 +754,10 @@ def animation_status(ws):
                 'active_animations': active_animations,
                 'gpio_pins': gpio_pins,
                 'camera_stats': camera_stats,
-                'motor_stats': motor_stats
+                'motor_stats': motor_stats,
+                'behaviour_status': behaviour_status,
+                'blackboard_data': blackboard_data,
+                'graph_data': graph_data,
             }
             
             try:
@@ -720,6 +797,11 @@ def handle_blender_live(ws):
 base_layer = create_animation_layer("idle", 1.0, True)
 base_layer.play()
 animation_controller.start()
+
+# Initialize ChairBehaviourTree after all controllers are set up
+# Pass available_animations to the animation_controller for access
+animation_controller.available_animations = available_animations
+chair_behaviour_tree = ChairBehaviourTree(animation_controller, yaw_controller, camera_controller, io_controller)
 
 if __name__ == '__main__':
     # Set up signal handler for SIGINT (Ctrl-C)

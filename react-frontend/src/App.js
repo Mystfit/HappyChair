@@ -5,6 +5,7 @@ import LayersPanel from './components/LayersPanel';
 import PlaylistsPanel from './components/PlaylistsPanel';
 import IOPanel from './components/IOPanel';
 import CameraPanel from './components/CameraPanel';
+import BehaviourPanel from './components/BehaviourPanel';
 import StatusIndicator from './components/StatusIndicator';
 
 function App() {
@@ -271,6 +272,12 @@ function App() {
           >
             GPIO & Motor
           </button>
+          <button 
+            className={activeTab === 'behaviour' ? 'active' : ''} 
+            onClick={() => setActiveTab('behaviour')}
+          >
+            Behaviour
+          </button>
         </div>
         
         <div className="tab-content">
@@ -312,6 +319,12 @@ function App() {
           
           {activeTab === 'io' && (
             <IOPanel 
+              onStatusUpdate={setStatus}
+            />
+          )}
+          
+          {activeTab === 'behaviour' && (
+            <BehaviourPanel 
               onStatusUpdate={setStatus}
             />
           )}
