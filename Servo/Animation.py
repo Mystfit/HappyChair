@@ -150,16 +150,19 @@ class ServoAnimationController(object):
         self._playlist_active_idx = next_playlist_anim_idx
                 
     def add_layer(self, layer):
-        self.stack.append(layer)
+        with self.anim_lock:
+            self.stack.append(layer)
         
     def remove_layer(self, layer):
         # Remove the layer from the stack only - anim_layers sync should be handled in anim_webapp.py
         print(f"Removing layer from stack: {layer.current_animation.name.split('.json')[0]}")
-        self.stack.remove(layer)
-        
+        with self.anim_lock:
+            self.stack.remove(layer)
+
     def create_layer(self, animation, name, weight=0.0, loop=False, transient=None):
         """Create an animation layer and add it to the player"""
         # If transient is None, default to the appropriate value based on mode and loop status
+        
         if transient is None:
             transient = not loop and self.animation_mode() == ServoAnimationController.TRANSPORT_MODE
         
@@ -203,7 +206,7 @@ class ServoAnimationController(object):
                 'weight': layer.weight,
                 'current_frame': layer.current_frame,
                 'total_frames': layer.current_animation.frames() if layer.current_animation else 0,
-                'is_playing': layer.is_playing()
+                'is_playing': layer.is_playing
             })
         return layers
         
@@ -495,7 +498,7 @@ class ServoAnimationLayer(object):
                     self._blending_out = False
                         
                     
-        
+    @property
     def is_playing(self):
         return self._is_playing
 

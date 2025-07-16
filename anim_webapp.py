@@ -740,7 +740,7 @@ def animation_status(ws):
             if chair_behaviour_tree:
                 behaviour_status = chair_behaviour_tree.get_tree_status()
                 blackboard_data = chair_behaviour_tree.get_blackboard_data()
-                graph_data = chair_behaviour_tree.generate_ascii_graph()
+                graph_data = chair_behaviour_tree.last_executed_ascii_graph
                       
             # Debug print
             # print(f"Active animations: {len(active_animations)}")

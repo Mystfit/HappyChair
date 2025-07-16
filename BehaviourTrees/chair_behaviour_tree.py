@@ -20,15 +20,32 @@ from yaw_controller import YawController
 class PlayAnimationAction(py_trees.behaviour.Behaviour):
     """Custom behaviour for playing servo animations."""
     
-    def __init__(self, name: str, animation_controller: ServoAnimationController, animation_name: str):
+    def __init__(self, name: str, animation_controller: ServoAnimationController, animation_name: str, looping: bool = False):
         super().__init__(name)
         self.animation_controller = animation_controller
         self.animation_name = animation_name
+        self.animation_blending_out = False
+        self.animation_started = False
+        self.animation_finished = False
+        self.animation_looping = looping
         self.blackboard = self.attach_blackboard_client(name="Animation")
         self.blackboard.register_key("current_animation", common.Access.WRITE)
         
     def setup(self, **kwargs):
         self.logger.debug(f"  {self.name} [PlayAnimationBehaviour::setup()]")
+        
+    def on_anim_finished_cb(self):
+        """Callback when animation finishes."""
+        self.logger.debug(f"  {self.name} [PlayAnimationBehaviour::on_anim_finished_cb()]")
+        self.animation_finished = True
+        self.blackboard.current_animation = None
+        self.feedback_message = f"Animation {self.animation_name} finished"
+        
+    def on_blend_out_cb(self):
+        """Callback when animation blending out."""
+        self.logger.debug(f"  {self.name} [PlayAnimationBehaviour::on_blend_out_cb()]")
+        self.animation_blending_out = True
+        self.feedback_message = f"Animation {self.animation_name} blending out"
         
     def initialise(self):
         self.logger.debug(f"  {self.name} [PlayAnimationBehaviour::initialise()]")
@@ -38,14 +55,14 @@ class PlayAnimationAction(py_trees.behaviour.Behaviour):
             if not layer and self.animation_name in self.animation_controller.available_animations:
                 layer = self.animation_controller.create_layer(
                     self.animation_controller.available_animations[self.animation_name],
-                    self.animation_name, 1.0, False
+                    self.animation_name, 1.0, self.animation_looping, True
                 )
-            if layer:
-                layer.play()
-                self.blackboard.current_animation = self.animation_name
-                self.feedback_message = f"Started animation: {self.animation_name}"
-            else:
-                self.feedback_message = f"Animation not found: {self.animation_name}"
+                layer.on_start_blend_out = self.on_blend_out_cb
+                layer.on_complete = self.on_anim_finished_cb
+            
+            self.animation_started = False
+            self.animation_finished = False
+            self.animation_blending_out = False
         except Exception as e:
             self.feedback_message = f"Error starting animation: {str(e)}"
         
@@ -54,28 +71,42 @@ class PlayAnimationAction(py_trees.behaviour.Behaviour):
         # Check if animation is still playing
         try:
             layer = self.animation_controller.get_layer_by_name(self.animation_name)
-            if layer and layer.is_playing():
-                return common.Status.RUNNING
             
-            if layer.is_blending_out():
-                self.feedback_message = f"Animation {self.animation_name} beginning to blend out"
-                return common.Status.SUCCESS
+            if layer:
+                if not self.animation_started:
+                    self.blackboard.current_animation = self.animation_name
+                    self.feedback_message = f"Started animation: {self.animation_name}"
 
-            if layer.is_completed():
-                self.feedback_message = f"Animation {self.animation_name} completed"
-                return common.Status.SUCCESS
+                    self.animation_started = True
+                    self.animation_controller.animate_layer_weight(layer, 1.0, 1.0)
+                    layer.play()
+                else:
+                    self.feedback_message = f"Animation {self.animation_name} on frame {layer.current_frame}"
+            
+                if self.animation_blending_out or self.animation_finished:
+                    self.feedback_message = f"Animation {self.animation_name} completed or blending out to completion"
+                    return common.Status.SUCCESS
+                
+                return common.Status.RUNNING
+            else:
+                self.feedback_message = f"Animation not found: {self.animation_name}"               
+
         except Exception as e:
             self.feedback_message = f"Error checking animation: {str(e)}"
-            return common.Status.FAILURE
+        
+        return common.Status.FAILURE
             
     def terminate(self, new_status):
         self.logger.debug(f"  {self.name} [PlayAnimationBehaviour::terminate()][{self.status}->{new_status}]")
         if new_status == common.Status.INVALID:
             # Stop animation if interrupted
             try:
-                layer = self.animation_controller.get_layer_by_name(self.animation_name)
-                if layer:
-                    layer.stop()
+                # print("Stopping animation because our event status was invalid")
+                # layer = self.animation_controller.get_layer_by_name(self.animation_name)
+                # self.animation_started = False
+                # if layer:
+                #     layer.stop()
+                pass
             except Exception as e:
                 self.logger.error(f"Error stopping animation: {str(e)}")
 
@@ -87,11 +118,13 @@ class PersonDetectionCheck(py_trees.behaviour.Behaviour):
         super().__init__(name)
         self.camera_controller = camera_controller
         self.blackboard = self.attach_blackboard_client(name="Camera")
+        self.blackboard.register_key("can_scan", common.Access.WRITE)
         self.blackboard.register_key("person_detected", common.Access.WRITE)
         self.blackboard.register_key("person_count", common.Access.WRITE)
         self.blackboard.register_key("tracked_person_info", common.Access.WRITE)
         self.blackboard.register_key("movement_direction", common.Access.WRITE)
         self.blackboard.register_key("normalized_speed", common.Access.WRITE)
+        self.blackboard.can_scan = False
         self.blackboard.person_detected = False
         self.blackboard.person_count = 0
         self.blackboard.tracked_person_info = None
@@ -108,9 +141,7 @@ class PersonDetectionCheck(py_trees.behaviour.Behaviour):
             # tracked_person_info = [det for det in detections if det.get('track_id') == person_id]
             movement_direction = stats.get('movement_direction', None)
             normalized_speed = stats.get('normalized_speed', None)
-            
-            print(f"PersonDetectionCheck: Detected {person_count} persons, tracked ID: {person_id}")
-            
+                        
             updated = person_id is not None
             self.blackboard.person_count = person_count
             self.blackboard.tracked_person_info = None
@@ -126,7 +157,7 @@ class PersonDetectionCheck(py_trees.behaviour.Behaviour):
                 return common.Status.SUCCESS
             
             self.feedback_message = "No change in person detection"
-            return common.Status.RUNNING
+            return common.Status.SUCCESS
         except Exception as e:
             self.feedback_message = f"Error in person detection: {str(e)}"
             return common.Status.FAILURE
@@ -141,8 +172,11 @@ class SeatSensorCheck(py_trees.behaviour.Behaviour):
         self.pin = pin
         self.blackboard = self.attach_blackboard_client(name="GPIO")
         self.blackboard.register_key("seat_occupied", common.Access.WRITE)
+        self.blackboard.register_key("seat_occupied_last", common.Access.WRITE)
+        self.blackboard.register_key("can_scan", common.Access.WRITE)
         self.blackboard.seat_occupied = False
-        
+        self.blackboard.seat_occupied_last = False
+
     def update(self):
         try:
             # Get pin state from IO controller
@@ -166,7 +200,7 @@ class SeatSensorCheck(py_trees.behaviour.Behaviour):
                 return common.Status.SUCCESS
             
             # self.feedback_message = "No change in seat sensor state"
-            return common.Status.RUNNING
+            return common.Status.SUCCESS
         
         except Exception as e:
             self.feedback_message = f"Error reading seat sensor: {str(e)}"
@@ -238,6 +272,9 @@ class ChairBehaviourTree:
         self.camera_controller = camera_controller
         self.io_controller = io_controller
         
+        # Callbacks
+        self.last_executed_ascii_graph = None
+        
         # Build the behavior tree
         self.root = self._create_tree()
         
@@ -247,6 +284,7 @@ class ChairBehaviourTree:
         # Create blackboard for shared data between behaviours
         self.blackboard = blackboard.Client(name="ChairBehaviourTree")
         self.blackboard.register_key(key="seat_occupied", access=common.Access.READ)
+        self.blackboard.register_key(key="seat_occupied_last", access=common.Access.READ)
         self.blackboard.register_key(key="person_detected", access=common.Access.READ)
         self.blackboard.register_key(key="current_animation", access=common.Access.READ)
         self.blackboard.register_key(key="person_count", access=common.Access.READ)
@@ -269,10 +307,39 @@ class ChairBehaviourTree:
     def _create_tree(self):
         """Create the basic behaviour tree structure."""
         # Create root selector - chooses between different high-level behaviors
-        root = composites.Parallel(name="Chair Root", policy=py_trees.common.ParallelPolicy.SuccessOnOne())
+        root = composites.Sequence(name="Root", memory=False)
         # root = composites.Selector(name="Chair Root", memory=False)
 
-        # Test basic sensor blackboard reads
+        # Create child nodes for different behaviors
+        sensor_populate_node = self._create_sensor_tree()
+        
+        tracking_node = self._create_scanning_tree()
+        sitting_node = self._create_sitting_tree()
+        tasks_selector = composites.Selector(name="Tasks", memory=True)
+        tasks_selector.add_children([
+            sitting_node,
+            tracking_node
+        ])
+
+        # Add basic idle behavior as fallback
+        idle_sequence = composites.Sequence(name="Idle Sequence", memory=True)
+        idle_sequence.add_children([
+            behaviours.Success(name="Idle Success")
+        ])
+        
+        # Add blackboard populators
+        root.add_children([
+            sensor_populate_node,
+            tasks_selector,
+            idle_sequence
+        ])
+                     
+        return root
+    
+    def _create_sensor_tree(self):
+        blackboard_root = composites.Parallel(name="Interrupts", policy=py_trees.common.ParallelPolicy.SuccessOnAll())
+
+        # Populate blackboard with sensor values
         seat_sensor_check = SeatSensorCheck(
             name="Seat Sensor Check",
             pin=14,  # Example GPIO pin for seat sensor
@@ -284,22 +351,137 @@ class ChairBehaviourTree:
             camera_controller=self.camera_controller
         )
         
-        blackboard_populate = composites.Parallel(name="Interrupts", policy=py_trees.common.ParallelPolicy.SuccessOnAll())
-        blackboard_populate.add_children([
+        blackboard_root.add_children([
             seat_sensor_check,
             person_detection_check
         ])
         
-        # Tree to handle when no-one is sitting on the chair
-        scan = py_trees.composites.Sequence(name="Scan", memory=True)
-        is_scan_requested = behaviours.CheckBlackboardVariableValue(
-            name="Seat empty?",
+        return blackboard_root
+
+    def _create_sitting_tree(self):
+        """Create the behaviour tree for when a person is sitting on the chair."""
+        
+        guard_sitting_in_seat = behaviours.CheckBlackboardVariableValue(
+            name="Check: Is seat occupied?",
+            check=common.ComparisonExpression(
+                variable="seat_occupied", value=True, operator=operator.eq
+            )
+        )
+        
+        guard_not_previously_in_seat = behaviours.CheckBlackboardVariableValue(
+            name="Check: Was seat previously occupied?",
+            check=common.ComparisonExpression(
+                variable="seat_occupied_last", value=False, operator=operator.eq
+            )
+        )
+        
+        person_in_seat_last_BB = behaviours.SetBlackboardVariable(
+            name="BB: Set person in seat",
+            variable_name="seat_occupied_last",
+            variable_value=True,
+            overwrite=True
+        )
+        
+        
+        # Disable scanning while sitting
+        disable_scanning_bb = behaviours.SetBlackboardVariable(
+            name="BB: Disable scanning",
+            variable_name="can_scan",
+            variable_value=False,
+            overwrite=True
+        )
+
+        # Create the sitting root sequence
+        sitting_animgraph = composites.Sequence(name="Sitting animations", memory=True)
+        
+        # Create actions for playing animations and tracking to face the person
+        hug_intro_anim = PlayAnimationAction(
+            name="Anim: Hug Intro",
+            animation_controller=self.animation_controller,
+            animation_name="hug_intro"
+        )
+        idle_animation = PlayAnimationAction(
+            name="Anim: Hug idle",
+            animation_controller=self.animation_controller,
+            animation_name="hug",
+            looping=True
+        )
+        
+        guard_person_left_seat = decorators.FailureIsRunning(
+            name="Decorator: Hug Outro",
+            child=behaviours.CheckBlackboardVariableValue(
+                name="Check: Did person leave seat?",
+                check=common.ComparisonExpression(
+                    variable="seat_occupied", value=False, operator=operator.eq
+                )
+            )
+        )
+        
+        # Outro animation to handle when person gets up
+        hug_outro_anim = PlayAnimationAction(
+            name="Anim: hug outro",
+            animation_controller=self.animation_controller,
+            animation_name="hug_exit"
+        )
+        person_finished_leaving_bb = behaviours.SetBlackboardVariable(
+            name="BB: Set person finished leaving",
+            variable_name="seat_occupied_last",
+            variable_value=False,
+            overwrite=True
+        )
+        enable_scanning_bb = behaviours.SetBlackboardVariable(
+            name="BB: Enable scanning",
+            variable_name="can_scan",
+            variable_value=True,
+            overwrite=True
+        )
+        
+        guard_leave_sitting_animations = behaviours.CheckBlackboardVariableValue(
+            name="Check: Is seat occupied?",
             check=common.ComparisonExpression(
                 variable="seat_occupied", value=False, operator=operator.eq
             )
         )
         
-        scan_handle_states = py_trees.composites.Selector(name="Searching for person", memory=True)
+        hug_outro_sequence = composites.Sequence(name="AnimSeq: Transition out of hug", memory=True)
+        hug_outro_sequence.add_children([
+            guard_leave_sitting_animations,
+            hug_outro_anim,
+            person_finished_leaving_bb,
+            enable_scanning_bb
+        ])
+        
+                # Add behaviours to the sitting root
+        sitting_animgraph.add_children([
+            guard_sitting_in_seat,
+            guard_not_previously_in_seat,
+            person_in_seat_last_BB,
+            disable_scanning_bb,
+            hug_intro_anim,
+            idle_animation,
+            guard_person_left_seat,
+            hug_outro_sequence
+        ])  
+
+        # Guard sitting animations to play only when seat is occupied
+        sitting_exit_selector = composites.Selector(name="Sitting Exit Selector", memory=True)
+        sitting_exit_selector.add_children([ 
+            sitting_animgraph
+        ])
+
+        return sitting_exit_selector
+    
+    def _create_scanning_tree(self):
+        # Tree to handle when no-one is sitting on the chair
+        scan_root = py_trees.composites.Sequence(name="Scan", memory=True)
+        is_scan_requested = behaviours.CheckBlackboardVariableValue(
+            name="Check: Can look for people?",
+            check=common.ComparisonExpression(
+                variable="can_scan", value=True, operator=operator.eq
+            )
+        )
+        
+        scan_handle_states = composites.Selector(name="Searching for person", memory=True)
         
         person_detected = behaviours.CheckBlackboardVariableValue(
             name="Person detected?",
@@ -312,33 +494,13 @@ class ChairBehaviourTree:
             behaviours.Success(name="Placeholder: Rotate chair to face person"),
         ])
         
-        scan.add_children([
+        scan_root.add_children([
             is_scan_requested,
             scan_handle_states
         ])
-
-        # Add basic idle behavior as fallback
-        idle_sequence = composites.Sequence(name="Idle Sequence", memory=True)
-        idle_sequence.add_children([
-            behaviours.Success(name="Idle Success")
-        ])
         
-        # Add blackboard populators
-        root.add_children([
-            blackboard_populate
-        ])
-             
-        # Create a selector to handle interrupts for when a person sits on the chair or approaches close enough
-        # This will handle 3 behaviour states
-        # - Search for a person by rotating the chair and pausing when we're facing a person
-        # - Play an animation when a person is close enough or return to searching if they move far enough away
-        # - Wait for a person to sit down and then switch to the sitting tree
-        top_selector = py_trees.composites.Selector(name="Selector", memory=False)
-        top_selector.add_children([scan, idle_sequence])
-        
-        root.add_child(top_selector)
-        
-        return root
+        return scan_root
+    
     
     def _find_behaviour_by_id(self, behaviour_id: uuid.UUID):
         """Find a behaviour in the tree by its UUID."""
@@ -414,7 +576,8 @@ class ChairBehaviourTree:
             while self.tree_running and not self._stop_event.is_set():
                 # Tick the tree using the BehaviourTree wrapper
                 self.tree.tick()
-                
+                self.last_executed_ascii_graph = self.generate_ascii_graph()
+                                    
                 # Sleep for a short period (10Hz tick rate)
                 time.sleep(0.1)
                 
@@ -467,7 +630,6 @@ class ChairBehaviourTree:
                 'tracked_person_info': self.blackboard.tracked_person_info if self.blackboard.exists('tracked_person_info') else None,
                 'movement_direction': self.blackboard.movement_direction if self.blackboard.exists('movement_direction') else None,
                 'normalized_speed': self.blackboard.normalized_speed if self.blackboard.exists('normalized_speed') else None,
-                'seat_occupied': self.blackboard.seat_occupied if self.blackboard.exists('seat_occupied') else False
             }
         except Exception as e:
             print(f"ChairBehaviourTree: Error getting blackboard data: {e}")
