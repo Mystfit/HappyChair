@@ -11,11 +11,39 @@ const IOPanel = ({ onStatusUpdate }) => {
     data_rate: 128
   });
   const [showAddChannel, setShowAddChannel] = useState(false);
+  
+  // Frontend voltage history tracking
+  const [voltageHistory, setVoltageHistory] = useState({});
+  const maxHistoryLength = 100;
 
   // Extract data from WebSocket
   const gpioPins = wsData.gpio_pins || {};
   const analogChannels = wsData.analog_channels || {};
-  const analogHistory = wsData.analog_history || {};
+
+  // Track voltage history locally when new data arrives
+  useEffect(() => {
+    if (analogChannels && Object.keys(analogChannels).length > 0) {
+      setVoltageHistory(prevHistory => {
+        const newHistory = { ...prevHistory };
+        
+        Object.entries(analogChannels).forEach(([channel, channelInfo]) => {
+          if (!newHistory[channel]) {
+            newHistory[channel] = [];
+          }
+          
+          // Add new voltage value
+          newHistory[channel].push(channelInfo.voltage);
+          
+          // Keep only the last maxHistoryLength values
+          if (newHistory[channel].length > maxHistoryLength) {
+            newHistory[channel] = newHistory[channel].slice(-maxHistoryLength);
+          }
+        });
+        
+        return newHistory;
+      });
+    }
+  }, [analogChannels, maxHistoryLength]);
   const motorStats = wsData.motor_stats || {
     motor_direction: 'stopped',
     motor_speed: 0.0,
@@ -243,7 +271,7 @@ const IOPanel = ({ onStatusUpdate }) => {
             {Object.keys(analogChannels).length > 0 ? (
               <div className="analog-channels">
                 {Object.entries(analogChannels).map(([channel, channelInfo]) => {
-                  const history = analogHistory[channel] || { voltage: [] };
+                  const history = voltageHistory[channel] || [];
                   return (
                     <div key={channel} className="analog-channel-item">
                       <div className="channel-info">
@@ -268,7 +296,7 @@ const IOPanel = ({ onStatusUpdate }) => {
                         </div>
                       </div>
                       <div className="channel-chart">
-                        <MiniChart data={history.voltage} />
+                        <MiniChart data={history} />
                       </div>
                     </div>
                   );

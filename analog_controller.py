@@ -259,19 +259,18 @@ class AnalogController:
     
     def get_channel_readings(self) -> Dict[int, Dict]:
         """Get current readings of all registered channels"""
-        with self.analog_lock:
-            return {
-                channel: {
-                    'name': info['name'],
-                    'raw_value': info['current_raw'],
-                    'voltage': info['current_voltage'],
-                    'gain': info['gain'],
-                    'data_rate': info['data_rate'],
-                    'last_changed': info['last_changed'],
-                    'stats': info['stats'].copy()
-                }
-                for channel, info in self.registered_channels.items()
+        return {
+            channel: {
+                'name': info['name'],
+                'raw_value': info['current_raw'],
+                'voltage': info['current_voltage'],
+                'gain': info['gain'],
+                'data_rate': info['data_rate'],
+                'last_changed': info['last_changed'],
+                'stats': info['stats'].copy()
             }
+            for channel, info in self.registered_channels.items()
+        }
     
     def get_channel_history(self, channel: int, samples: int = None) -> Dict[str, List]:
         """Get historical data for a specific channel"""

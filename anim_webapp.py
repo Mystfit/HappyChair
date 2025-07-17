@@ -883,7 +883,6 @@ def animation_status(ws):
                 'active_animations': active_animations,
                 'gpio_pins': gpio_pins,
                 'analog_channels': analog_channels,
-                # 'analog_history': analog_history,
                 'camera_stats': camera_stats,
                 'motor_stats': motor_stats,
                 'behaviour_status': behaviour_status,
