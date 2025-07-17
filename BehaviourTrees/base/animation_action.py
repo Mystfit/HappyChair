@@ -10,10 +10,11 @@ from typing import Optional
 class AnimationAction(py_trees.behaviour.Behaviour):
     """Generic behaviour for playing servo animations."""
     
-    def __init__(self, name: str, animation_controller, animation_name: str, looping: bool = False):
+    def __init__(self, name: str, animation_controller, animation_name: str, looping: bool = False, autoplay: bool = True):
         super().__init__(name)
         self.animation_controller = animation_controller
         self.animation_name = animation_name
+        self.animation_autoplay = autoplay
         self.animation_blending_out = False
         self.animation_started = False
         self.animation_finished = False
@@ -45,7 +46,7 @@ class AnimationAction(py_trees.behaviour.Behaviour):
             if not layer and self.animation_name in self.animation_controller.available_animations:
                 layer = self.animation_controller.create_layer(
                     self.animation_controller.available_animations[self.animation_name],
-                    self.animation_name, 1.0, self.animation_looping, True
+                    self.animation_name, 1.0, self.animation_looping, True, self.animation_autoplay
                 )
                 layer.on_start_blend_out = self.on_blend_out_cb
                 layer.on_complete = self.on_anim_finished_cb
@@ -66,10 +67,8 @@ class AnimationAction(py_trees.behaviour.Behaviour):
                 if not self.animation_started:
                     self.blackboard.current_animation = self.animation_name
                     self.feedback_message = f"Started animation: {self.animation_name}"
-
                     self.animation_started = True
                     self.animation_controller.animate_layer_weight(layer, 1.0, 1.0)
-                    layer.play()
                 else:
                     self.feedback_message = f"Animation {self.animation_name} on frame {layer.current_frame}"
             

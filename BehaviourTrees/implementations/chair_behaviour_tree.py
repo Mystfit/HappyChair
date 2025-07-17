@@ -14,8 +14,8 @@ class ChairBehaviourTree(AnimatronicBehaviourTree):
     """Chair-specific behaviour tree implementation."""
     
     # Chair-specific configuration
-    SEAT_SENSOR_PIN = 14
-    
+    SEAT_SENSOR = "seatsensor"
+
     ANIMATIONS = {
         'hug_intro': 'hug_intro',
         'hug_idle': 'hug', 
@@ -45,8 +45,8 @@ class ChairBehaviourTree(AnimatronicBehaviourTree):
             name="Seat Sensor Check",
             sensor_key="seat_occupied",
             io_controller=self.io_controller,
-            pin=self.SEAT_SENSOR_PIN,
-            inverted=True,  # Pull-up configuration: 0 = occupied, 1 = not occupied
+            pin_name=self.SEAT_SENSOR,
+            pin_value_inverted=True,  # Pin should be pull-up configuration so invert pin state
             blackboard_namespace="GPIO"
         )
         
@@ -123,7 +123,8 @@ class ChairBehaviourTree(AnimatronicBehaviourTree):
             name="Anim: Hug idle",
             animation_controller=self.animation_controller,
             animation_name=self.ANIMATIONS['hug_idle'],
-            looping=True
+            looping=True,
+            autoplay=False
         )
         
         guard_person_left_seat = decorators.FailureIsRunning(

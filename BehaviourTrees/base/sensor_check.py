@@ -10,13 +10,13 @@ from typing import Dict, Any
 class SensorCheck(py_trees.behaviour.Behaviour):
     """Generic behaviour for checking sensor states."""
     
-    def __init__(self, name: str, sensor_key: str, io_controller, pin: int, 
-                 inverted: bool = True, blackboard_namespace: str = "Sensor"):
+    def __init__(self, name: str, sensor_key: str, io_controller, pin_name: str, 
+                 pin_value_inverted: bool = True, blackboard_namespace: str = "Sensor"):
         super().__init__(name)
         self.io_controller = io_controller
-        self.pin = pin
+        self.pin = pin_name
         self.sensor_key = sensor_key
-        self.inverted = inverted  # For pull-up configurations where 0 = active
+        self.pin_value_inverted = pin_value_inverted  # For pull-up configurations where 0 = active
         self.blackboard = self.attach_blackboard_client(name=blackboard_namespace)
         self.blackboard.register_key(sensor_key, common.Access.WRITE)
         self.blackboard.register_key(f"{sensor_key}_last", common.Access.WRITE)
@@ -32,11 +32,16 @@ class SensorCheck(py_trees.behaviour.Behaviour):
                 self.feedback_message = "IOController not initialized"
                 return common.Status.FAILURE
             
-            pin_states = self.io_controller.get_pin_states()
-            pin_state = pin_states.get(self.pin, {}).get('state', 1)
+            pin_states = self.io_controller.get_pin_states_by_name()
+            
+            try:
+                pin_state = pin_states.get(self.pin, {}).get('state', 1)
+            except KeyError:
+                self.feedback_message = f"Pin {self.pin} not found in pin states"
+                return common.Status.FAILURE
             
             # Apply inversion if configured (for pull-up: 0 = active, 1 = inactive)
-            sensor_active = (pin_state == 0) if self.inverted else (pin_state == 1)
+            sensor_active = (pin_state == 0) if self.pin_value_inverted else (pin_state == 1)
             
             # Check for state change
             current_state = getattr(self.blackboard, self.sensor_key, False)

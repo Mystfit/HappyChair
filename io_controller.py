@@ -209,6 +209,20 @@ class IOController:
                 }
                 for pin, info in self.registered_pins.items()
             }
+            
+    def get_pin_states_by_name(self) -> Dict[int, Dict]:
+        """Get current states of all registered pins"""
+        with self.gpio_lock:
+            return {
+                info['name']: {
+                    'pin': pin,
+                    'direction': info['direction'],
+                    'state': info['state'],
+                    'bias': info['bias'],
+                    'last_changed': info['last_changed']
+                }
+                for pin, info in self.registered_pins.items()
+            }
     
     def register_event_callback(self, callback: Callable):
         """Register a callback function for events"""
