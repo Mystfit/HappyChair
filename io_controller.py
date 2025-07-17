@@ -202,6 +202,7 @@ class IOController:
             return {
                 pin: {
                     'name': info['name'],
+                    'direction': info['direction'],
                     'state': info['state'],
                     'bias': info['bias'],
                     'last_changed': info['last_changed']

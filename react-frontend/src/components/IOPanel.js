@@ -1,119 +1,318 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { useWebSocket } from '../contexts/WebSocketContext';
 
 const IOPanel = ({ onStatusUpdate }) => {
-  const [motorStats, setMotorStats] = useState({
+  const { data: wsData, isConnected, connectionError } = useWebSocket();
+  const [error, setError] = useState(null);
+  const [analogChannelConfig, setAnalogChannelConfig] = useState({
+    channel: 0,
+    name: '',
+    gain: 1,
+    data_rate: 128
+  });
+  const [showAddChannel, setShowAddChannel] = useState(false);
+
+  // Extract data from WebSocket
+  const gpioPins = wsData.gpio_pins || {};
+  const analogChannels = wsData.analog_channels || {};
+  const analogHistory = wsData.analog_history || {};
+  const motorStats = wsData.motor_stats || {
     motor_direction: 'stopped',
     motor_speed: 0.0,
     tracking_enabled: false
-  });
-  const [gpioPins, setGpioPins] = useState({});
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
+  };
 
-  // Poll GPIO and motor status every second
-  useEffect(() => {
-    const interval = setInterval(fetchIOStatus, 1000);
-    return () => clearInterval(interval);
-  }, []);
+  // Mini chart component for analog sensors
+  const MiniChart = ({ data, width = 80, height = 30 }) => {
+    const canvasRef = useRef(null);
 
-  const fetchIOStatus = async () => {
+    useEffect(() => {
+      if (!data || data.length === 0) return;
+
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+
+      const ctx = canvas.getContext('2d');
+      const dpr = window.devicePixelRatio || 1;
+      
+      // Set canvas size
+      canvas.width = width * dpr;
+      canvas.height = height * dpr;
+      canvas.style.width = width + 'px';
+      canvas.style.height = height + 'px';
+      ctx.scale(dpr, dpr);
+
+      // Clear canvas
+      ctx.clearRect(0, 0, width, height);
+
+      if (data.length < 2) return;
+
+      // Find min/max for scaling
+      const min = Math.min(...data);
+      const max = Math.max(...data);
+      const range = max - min || 1; // Avoid division by zero
+
+      // Draw line chart
+      ctx.strokeStyle = '#007bff';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+
+      data.forEach((value, index) => {
+        const x = (index / (data.length - 1)) * width;
+        const y = height - ((value - min) / range) * height;
+        
+        if (index === 0) {
+          ctx.moveTo(x, y);
+        } else {
+          ctx.lineTo(x, y);
+        }
+      });
+
+      ctx.stroke();
+
+      // Draw dots for last few points
+      ctx.fillStyle = '#007bff';
+      const lastPoints = data.slice(-3);
+      lastPoints.forEach((value, i) => {
+        const actualIndex = data.length - lastPoints.length + i;
+        const x = (actualIndex / (data.length - 1)) * width;
+        const y = height - ((value - min) / range) * height;
+        
+        ctx.beginPath();
+        ctx.arc(x, y, 1.5, 0, 2 * Math.PI);
+        ctx.fill();
+      });
+
+    }, [data, width, height]);
+
+    return <canvas ref={canvasRef} style={{ display: 'block' }} />;
+  };
+
+  const handleAddAnalogChannel = async () => {
     try {
-      // Fetch GPIO pins
-      const gpioResponse = await fetch('/api/gpio/pins');
-      const gpioData = await gpioResponse.json();
-      
-      // Fetch motor status
-      const motorResponse = await fetch('/api/yaw/status');
-      const motorData = await motorResponse.json();
-      
-      if (gpioData.success) {
-        setGpioPins(gpioData.pins || {});
+      const response = await fetch('/api/analog/register', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(analogChannelConfig)
+      });
+
+      const result = await response.json();
+      if (result.success) {
+        setShowAddChannel(false);
+        setAnalogChannelConfig({ channel: 0, name: '', gain: 1, data_rate: 128 });
+        setError(null);
+      } else {
+        setError(result.error);
       }
-      
-      if (motorData.success) {
-        setMotorStats({
-          motor_direction: motorData.motor_direction,
-          motor_speed: motorData.motor_speed,
-          tracking_enabled: motorData.tracking_enabled
-        });
-      }
-      
-      setError(null);
     } catch (err) {
-      setError(`Network error: ${err.message}`);
+      setError(`Failed to add channel: ${err.message}`);
     }
   };
 
   return (
     <div className="io-panel">
       <div className="panel-header">
-        <h3>GPIO & Motor Control Panel</h3>
+        <h3>GPIO, Analog & Motor Control Panel</h3>
+        {!isConnected && (
+          <div className="connection-status">
+            <span className="status-indicator offline"></span>
+            WebSocket Disconnected
+          </div>
+        )}
       </div>
 
-      {error && (
+      {(error || connectionError) && (
         <div className="alert alert-danger">
-          <strong>Error:</strong> {error}
+          <strong>Error:</strong> {error || connectionError}
         </div>
       )}
 
       <div className="io-content">
-        <div className="gpio-status">
-          <h4>GPIO Pin Status</h4>
-          {Object.keys(gpioPins).length > 0 ? (
-            <div className="gpio-pins">
-              {Object.entries(gpioPins).map(([pinNumber, pinInfo]) => (
-                <div key={pinNumber} className="gpio-pin-item">
-                  <div className="pin-info">
-                    <span className="pin-number">Pin {pinNumber}</span>
-                    <span className="pin-name">{pinInfo.name}</span>
+        <div className="gpio-section">
+          <div className="gpio-status">
+            <h4>GPIO Pin Status</h4>
+            {Object.keys(gpioPins).length > 0 ? (
+              <div className="gpio-pins">
+                {Object.entries(gpioPins).map(([pinNumber, pinInfo]) => (
+                  <div key={pinNumber} className="gpio-pin-item">
+                    <div className="pin-info">
+                      <span className="pin-number">Pin {pinNumber}</span>
+                      <span className="pin-name">{pinInfo.name}</span>
+                      <span className="pin-direction">{pinInfo.direction}</span>
+                    </div>
+                    <div className="pin-status">
+                      <div 
+                        className={`status-circle ${pinInfo.state ? 'lit' : 'unlit'}`}
+                        title={`State: ${pinInfo.state ? 'HIGH' : 'LOW'}`}
+                      ></div>
+                      <span className="pin-state">
+                        {pinInfo.state ? 'HIGH' : 'LOW'}
+                      </span>
+                    </div>
                   </div>
-                  <div className="pin-status">
-                    <div 
-                      className={`status-circle ${pinInfo.state ? 'lit' : 'unlit'}`}
-                      title={`State: ${pinInfo.state ? 'HIGH' : 'LOW'}`}
-                    ></div>
-                    <span className="pin-state">
-                      {pinInfo.state ? 'HIGH' : 'LOW'}
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="no-pins">
-              <span>No GPIO pins registered</span>
-            </div>
-          )}
+                ))}
+              </div>
+            ) : (
+              <div className="no-pins">
+                <span>No GPIO pins registered</span>
+              </div>
+            )}
+          </div>
         </div>
-        
-        <div className="motor-status">
-          <h4>Motor Status</h4>
-          <div className="motor-info">
-            <div className="motor-direction">
-              <span className="motor-label">Direction:</span>
-              <span className={`motor-value direction-${motorStats.motor_direction}`}>
-                {motorStats.motor_direction === 'forward' ? '← Forward' : 
-                 motorStats.motor_direction === 'reverse' ? 'Reverse →' : 
-                 '● Stopped'}
-              </span>
+
+        <div className="analog-section">
+          <div className="analog-status">
+            <div className="analog-header">
+              <h4>Analog Sensors</h4>
+              <button 
+                className="btn btn-sm btn-primary"
+                onClick={() => setShowAddChannel(!showAddChannel)}
+              >
+                Add Channel
+              </button>
             </div>
-            <div className="motor-speed">
-              <span className="motor-label">Speed:</span>
-              <div className="speed-display">
-                <span className="speed-value">{(motorStats.motor_speed * 100).toFixed(0)}%</span>
-                <div className="speed-bar">
-                  <div 
-                    className="speed-fill" 
-                    style={{width: `${motorStats.motor_speed * 100}%`}}
-                  ></div>
+
+            {showAddChannel && (
+              <div className="add-channel-form">
+                <div className="form-row">
+                  <label>
+                    Channel:
+                    <select 
+                      value={analogChannelConfig.channel} 
+                      onChange={(e) => setAnalogChannelConfig({...analogChannelConfig, channel: parseInt(e.target.value)})}
+                    >
+                      <option value={0}>0</option>
+                      <option value={1}>1</option>
+                      <option value={2}>2</option>
+                      <option value={3}>3</option>
+                    </select>
+                  </label>
+                  <label>
+                    Name:
+                    <input 
+                      type="text" 
+                      value={analogChannelConfig.name} 
+                      onChange={(e) => setAnalogChannelConfig({...analogChannelConfig, name: e.target.value})}
+                      placeholder="Sensor name"
+                    />
+                  </label>
+                </div>
+                <div className="form-row">
+                  <label>
+                    Gain:
+                    <select 
+                      value={analogChannelConfig.gain} 
+                      onChange={(e) => setAnalogChannelConfig({...analogChannelConfig, gain: parseInt(e.target.value)})}
+                    >
+                      <option value={1}>1x</option>
+                      <option value={2}>2x</option>
+                      <option value={4}>4x</option>
+                      <option value={8}>8x</option>
+                      <option value={16}>16x</option>
+                    </select>
+                  </label>
+                  <label>
+                    Data Rate:
+                    <select 
+                      value={analogChannelConfig.data_rate} 
+                      onChange={(e) => setAnalogChannelConfig({...analogChannelConfig, data_rate: parseInt(e.target.value)})}
+                    >
+                      <option value={128}>128 SPS</option>
+                      <option value={250}>250 SPS</option>
+                      <option value={490}>490 SPS</option>
+                      <option value={920}>920 SPS</option>
+                      <option value={1600}>1600 SPS</option>
+                      <option value={2400}>2400 SPS</option>
+                      <option value={3300}>3300 SPS</option>
+                    </select>
+                  </label>
+                </div>
+                <div className="form-actions">
+                  <button className="btn btn-sm btn-success" onClick={handleAddAnalogChannel}>
+                    Add
+                  </button>
+                  <button className="btn btn-sm btn-secondary" onClick={() => setShowAddChannel(false)}>
+                    Cancel
+                  </button>
                 </div>
               </div>
-            </div>
-            <div className="motor-tracking">
-              <span className="motor-label">Tracking:</span>
-              <span className={`motor-value tracking-${motorStats.tracking_enabled ? 'enabled' : 'disabled'}`}>
-                {motorStats.tracking_enabled ? '● Enabled' : '○ Disabled'}
-              </span>
+            )}
+
+            {Object.keys(analogChannels).length > 0 ? (
+              <div className="analog-channels">
+                {Object.entries(analogChannels).map(([channel, channelInfo]) => {
+                  const history = analogHistory[channel] || { voltage: [] };
+                  return (
+                    <div key={channel} className="analog-channel-item">
+                      <div className="channel-info">
+                        <div className="channel-header">
+                          <span className="channel-number">Ch {channel}</span>
+                          <span className="channel-name">{channelInfo.name}</span>
+                        </div>
+                        <div className="channel-values">
+                          <div className="value-group">
+                            <span className="value-label">Raw:</span>
+                            <span className="value-number">{channelInfo.raw_value}</span>
+                          </div>
+                          <div className="value-group">
+                            <span className="value-label">Voltage:</span>
+                            <span className="value-number">{channelInfo.voltage.toFixed(3)}V</span>
+                          </div>
+                        </div>
+                        <div className="channel-stats">
+                          <span>Min: {channelInfo.stats.min_voltage.toFixed(2)}V</span>
+                          <span>Max: {channelInfo.stats.max_voltage.toFixed(2)}V</span>
+                          <span>Avg: {channelInfo.stats.avg_voltage.toFixed(2)}V</span>
+                        </div>
+                      </div>
+                      <div className="channel-chart">
+                        <MiniChart data={history.voltage} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="no-channels">
+                <span>No analog channels registered</span>
+                <small>Use the "Add Channel" button to register ADS1015 channels</small>
+              </div>
+            )}
+          </div>
+        </div>
+        
+        <div className="motor-section">
+          <div className="motor-status">
+            <h4>Motor Status</h4>
+            <div className="motor-info">
+              <div className="motor-direction">
+                <span className="motor-label">Direction:</span>
+                <span className={`motor-value direction-${motorStats.motor_direction}`}>
+                  {motorStats.motor_direction === 'forward' ? '← Forward' : 
+                   motorStats.motor_direction === 'reverse' ? 'Reverse →' : 
+                   '● Stopped'}
+                </span>
+              </div>
+              <div className="motor-speed">
+                <span className="motor-label">Speed:</span>
+                <div className="speed-display">
+                  <span className="speed-value">{(motorStats.motor_speed * 100).toFixed(0)}%</span>
+                  <div className="speed-bar">
+                    <div 
+                      className="speed-fill" 
+                      style={{width: `${motorStats.motor_speed * 100}%`}}
+                    ></div>
+                  </div>
+                </div>
+              </div>
+              <div className="motor-tracking">
+                <span className="motor-label">Tracking:</span>
+                <span className={`motor-value tracking-${motorStats.tracking_enabled ? 'enabled' : 'disabled'}`}>
+                  {motorStats.tracking_enabled ? '● Enabled' : '○ Disabled'}
+                </span>
+              </div>
             </div>
           </div>
         </div>
@@ -124,9 +323,35 @@ const IOPanel = ({ onStatusUpdate }) => {
           padding: 20px;
         }
         
-        .panel-header h3 {
+        .panel-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
           margin-bottom: 20px;
+        }
+        
+        .panel-header h3 {
+          margin: 0;
           color: #333;
+        }
+        
+        .connection-status {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          font-size: 12px;
+          color: #dc3545;
+        }
+        
+        .status-indicator {
+          width: 8px;
+          height: 8px;
+          border-radius: 50%;
+          background-color: #28a745;
+        }
+        
+        .status-indicator.offline {
+          background-color: #dc3545;
         }
         
         .alert {
@@ -147,25 +372,97 @@ const IOPanel = ({ onStatusUpdate }) => {
           gap: 20px;
         }
         
-        .gpio-status {
+        .gpio-section, .analog-section, .motor-section {
           background-color: #f8f9fa;
           padding: 15px;
           border-radius: 8px;
           border: 1px solid #dee2e6;
         }
         
-        .gpio-status h4 {
+        .gpio-status h4, .analog-status h4, .motor-status h4 {
           margin-bottom: 15px;
           color: #495057;
         }
         
-        .gpio-pins {
+        .analog-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 15px;
+        }
+        
+        .btn {
+          padding: 6px 12px;
+          border: none;
+          border-radius: 4px;
+          cursor: pointer;
+          font-size: 12px;
+          font-weight: 500;
+        }
+        
+        .btn-sm {
+          padding: 4px 8px;
+          font-size: 11px;
+        }
+        
+        .btn-primary {
+          background-color: #007bff;
+          color: white;
+        }
+        
+        .btn-success {
+          background-color: #28a745;
+          color: white;
+        }
+        
+        .btn-secondary {
+          background-color: #6c757d;
+          color: white;
+        }
+        
+        .add-channel-form {
+          background-color: white;
+          padding: 15px;
+          border-radius: 5px;
+          border: 1px solid #e9ecef;
+          margin-bottom: 15px;
+        }
+        
+        .form-row {
+          display: flex;
+          gap: 15px;
+          margin-bottom: 10px;
+        }
+        
+        .form-row label {
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+          font-size: 12px;
+          font-weight: 500;
+          color: #495057;
+        }
+        
+        .form-row select, .form-row input {
+          padding: 4px 8px;
+          border: 1px solid #ced4da;
+          border-radius: 3px;
+          font-size: 12px;
+        }
+        
+        .form-actions {
+          display: flex;
+          gap: 8px;
+          justify-content: flex-end;
+        }
+        
+        .gpio-pins, .analog-channels {
           display: flex;
           flex-direction: column;
           gap: 10px;
         }
         
-        .gpio-pin-item {
+        .gpio-pin-item, .analog-channel-item {
           display: flex;
           justify-content: space-between;
           align-items: center;
@@ -175,21 +472,81 @@ const IOPanel = ({ onStatusUpdate }) => {
           border: 1px solid #e9ecef;
         }
         
-        .pin-info {
+        .analog-channel-item {
+          flex-direction: row;
+          align-items: flex-start;
+        }
+        
+        .pin-info, .channel-info {
           display: flex;
           flex-direction: column;
           gap: 2px;
         }
         
-        .pin-number {
+        .channel-info {
+          flex: 1;
+          gap: 8px;
+        }
+        
+        .pin-number, .channel-number {
           font-weight: bold;
           color: #495057;
           font-size: 14px;
         }
         
-        .pin-name {
+        .pin-name, .channel-name {
           color: #6c757d;
           font-size: 12px;
+        }
+
+        .pin-direction, .channel-direction {
+          color: #707376ff;
+          font-size: 10px;
+        }
+        
+        .channel-header {
+          display: flex;
+          gap: 8px;
+          align-items: center;
+        }
+        
+        .channel-values {
+          display: flex;
+          gap: 15px;
+        }
+        
+        .value-group {
+          display: flex;
+          gap: 4px;
+          align-items: center;
+        }
+        
+        .value-label {
+          font-size: 11px;
+          color: #6c757d;
+          font-weight: 500;
+        }
+        
+        .value-number {
+          font-size: 13px;
+          font-weight: bold;
+          color: #495057;
+          font-family: monospace;
+        }
+        
+        .channel-stats {
+          display: flex;
+          gap: 10px;
+          font-size: 10px;
+          color: #6c757d;
+        }
+        
+        .channel-chart {
+          margin-left: 15px;
+          border: 1px solid #e9ecef;
+          border-radius: 3px;
+          background-color: #fff;
+          padding: 4px;
         }
         
         .pin-status {
@@ -224,23 +581,22 @@ const IOPanel = ({ onStatusUpdate }) => {
           min-width: 35px;
         }
         
-        .no-pins {
+        .no-pins, .no-channels {
           text-align: center;
           color: #6c757d;
           font-style: italic;
           padding: 20px;
         }
         
-        .motor-status {
-          background-color: #f8f9fa;
-          padding: 15px;
-          border-radius: 8px;
-          border: 1px solid #dee2e6;
+        .no-channels {
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
         }
         
-        .motor-status h4 {
-          margin-bottom: 15px;
-          color: #495057;
+        .no-channels small {
+          font-size: 11px;
+          color: #adb5bd;
         }
         
         .motor-info {
@@ -316,16 +672,20 @@ const IOPanel = ({ onStatusUpdate }) => {
           border-radius: 4px;
         }
         
-        @media (min-width: 768px) {
+        @media (min-width: 1200px) {
           .io-content {
             flex-direction: row;
           }
           
-          .gpio-status {
+          .gpio-section {
             flex: 1;
           }
           
-          .motor-status {
+          .analog-section {
+            flex: 1.5;
+          }
+          
+          .motor-section {
             flex: 1;
           }
         }

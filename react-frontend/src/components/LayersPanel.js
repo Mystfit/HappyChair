@@ -27,7 +27,7 @@ function LayersPanel({ animations, onPlayAnimation, onUploadAnimation }) {
   useEffect(() => {
     if (!layerStatus) return;
     
-    console.log("Received layer status from WebSocket:", layerStatus);
+    // console.log("Received layer status from WebSocket:", layerStatus);
     
     // In dynamic mode, we need to fully sync with backend layers
     // This means adding new layers, updating existing ones, and removing those no longer active

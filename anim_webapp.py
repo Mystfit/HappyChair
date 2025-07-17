@@ -9,6 +9,7 @@ from geventwebsocket.handler import WebSocketHandler
 from Servo.Animation import ServoAnimationClip, ServoAnimationController, ServoAnimationLayer, Playlist
 from pathlib import Path
 from io_controller import IOController
+from analog_controller import AnalogController
 from camera_controller import CameraController
 from yaw_controller import YawController
 from BehaviourTrees.implementations.chair_behaviour_tree import ChairBehaviourTree
@@ -31,6 +32,8 @@ def shutdown(signum, frame):
         yaw_controller.shutdown()
     if io_controller:
         io_controller.shutdown()
+    if analog_controller:
+        analog_controller.shutdown()
     if camera_controller:
         camera_controller.shutdown()
     sys.exit()
@@ -86,8 +89,9 @@ sock = Sock(app)
 
 # Initialize IOController to handle GPIO only
 io_controller = IOController()
-io_controller.register_pin(14, "seatsensor", "input", "pull_up")
-io_controller.register_pin(15, "spinclutch", "output")
+
+# Initialize AnalogController for analog sensor monitoring
+analog_controller = AnalogController()
 
 # Initialize CameraController to handle camera detection
 camera_controller = CameraController()
@@ -570,6 +574,125 @@ def api_gpio_pins():
             'error': f'Failed to get GPIO pin states: {str(e)}'
         }), 500
 
+# Analog Sensor API Endpoints
+@app.route('/api/analog/channels', methods=['GET'])
+def api_analog_channels():
+    global analog_controller
+    try:
+        if analog_controller:
+            channel_readings = analog_controller.get_channel_readings()
+            return jsonify({
+                'success': True,
+                'channels': channel_readings
+            })
+        else:
+            return jsonify({
+                'success': True,
+                'channels': {}
+            })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'Failed to get analog channel readings: {str(e)}'
+        }), 500
+
+@app.route('/api/analog/register', methods=['POST'])
+def api_analog_register():
+    global analog_controller
+    try:
+        data = request.json
+        channel = int(data.get('channel'))
+        name = data.get('name', f'Channel {channel}')
+        gain = int(data.get('gain', 1))
+        data_rate = int(data.get('data_rate', 128))
+        history_size = int(data.get('history_size', 100))
+        threshold = float(data.get('threshold', 0.01))
+        
+        if analog_controller:
+            success = analog_controller.register_channel(
+                channel=channel,
+                name=name,
+                gain=gain,
+                data_rate=data_rate,
+                history_size=history_size,
+                threshold=threshold
+            )
+            
+            if success:
+                return jsonify({
+                    'success': True,
+                    'message': f'Channel {channel} registered successfully',
+                    'channel': channel,
+                    'name': name
+                })
+            else:
+                return jsonify({
+                    'success': False,
+                    'error': f'Failed to register channel {channel}'
+                }), 500
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'AnalogController not initialized'
+            }), 400
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'Failed to register analog channel: {str(e)}'
+        }), 500
+
+@app.route('/api/analog/history/<int:channel>', methods=['GET'])
+def api_analog_history(channel):
+    global analog_controller
+    try:
+        samples = request.args.get('samples', type=int)
+        
+        if analog_controller:
+            history = analog_controller.get_channel_history(channel, samples)
+            return jsonify({
+                'success': True,
+                'channel': channel,
+                'history': history
+            })
+        else:
+            return jsonify({
+                'success': True,
+                'channel': channel,
+                'history': {'raw': [], 'voltage': [], 'timestamps': []}
+            })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'Failed to get channel history: {str(e)}'
+        }), 500
+
+@app.route('/api/analog/status', methods=['GET'])
+def api_analog_status():
+    global analog_controller
+    try:
+        if analog_controller:
+            channel_readings = analog_controller.get_channel_readings()
+            all_history = analog_controller.get_all_channel_history(samples=20)  # Last 20 samples for mini charts
+            
+            return jsonify({
+                'success': True,
+                'channels': channel_readings,
+                'history': all_history,
+                'adc_initialized': analog_controller.adc_initialized
+            })
+        else:
+            return jsonify({
+                'success': True,
+                'channels': {},
+                'history': {},
+                'adc_initialized': False
+            })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'Failed to get analog status: {str(e)}'
+        }), 500
+
 # Yaw Control API Endpoints
 @app.route('/api/yaw/start-tracking', methods=['POST'])
 def api_start_yaw_tracking():
@@ -709,7 +832,7 @@ def api_behaviour_tree_graph():
 # WebSocket routes
 @sock.route('/api/ws/status')
 def animation_status(ws):
-    global animation_controller, io_controller, camera_controller, yaw_controller, chair_behaviour_tree
+    global animation_controller, io_controller, analog_controller, camera_controller, yaw_controller, chair_behaviour_tree
     try:
         # Check if the WebSocket is still connected
         while ws.connected:
@@ -722,6 +845,8 @@ def animation_status(ws):
             
             # Get controller data
             gpio_pins = {}
+            analog_channels = {}
+            analog_history = {}
             camera_stats = {}
             motor_stats = {}
             behaviour_status = {}
@@ -730,6 +855,10 @@ def animation_status(ws):
             
             if io_controller:
                 gpio_pins = io_controller.get_pin_states()
+            
+            if analog_controller:
+                analog_channels = analog_controller.get_channel_readings()
+                # analog_history = analog_controller.get_all_channel_history(samples=100)
             
             if camera_controller:
                 camera_stats = camera_controller.get_detection_stats()
@@ -753,6 +882,8 @@ def animation_status(ws):
                 'global_framerate': animation_controller.framerate,
                 'active_animations': active_animations,
                 'gpio_pins': gpio_pins,
+                'analog_channels': analog_channels,
+                # 'analog_history': analog_history,
                 'camera_stats': camera_stats,
                 'motor_stats': motor_stats,
                 'behaviour_status': behaviour_status,
@@ -806,7 +937,16 @@ chair_behaviour_tree = ChairBehaviourTree(animation_controller, yaw_controller, 
 if __name__ == '__main__':
     # Set up signal handler for SIGINT (Ctrl-C)
     signal.signal(signal.SIGINT, shutdown)
-        
+    
+    # Optional: Register analog sensor channels (uncomment to enable)
+    # Example configuration for ADS1015 analog sensors
+    # analog_controller.register_channel(0, "Pressure Sensor", gain=1, data_rate=128)
+    # analog_controller.register_channel(1, "Temperature", gain=2, data_rate=250)
+    analog_controller.register_channel(0, "ShoulderL_pressure", gain=1, data_rate=128, history_size=100, threshold=0.01)
+
+    io_controller.register_pin(14, "seatsensor", "input", "pull_up")
+    io_controller.register_pin(15, "spinclutch", "output")
+
     #player = AnimationController().start()
     animation_controller.add_servo(15, "shoulder.R", None,  (500, 2500))
     animation_controller.add_servo(14, "elbow.R", None,  (500, 2500))

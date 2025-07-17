@@ -296,3 +296,4 @@ zipp==1.0.0
 zope.event==5.0
 zope.interface==7.2
 py_trees
+adafruit-circuitpython-ads1x15

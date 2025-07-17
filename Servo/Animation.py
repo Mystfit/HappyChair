@@ -1,6 +1,6 @@
 import json
 from adafruit_servokit import ServoKit
-from Servo.DRV8825 import DRV8825
+from Stepper.DRV8825 import DRV8825
 import math, time, os
 import numpy as np
 from threading import Thread, Lock

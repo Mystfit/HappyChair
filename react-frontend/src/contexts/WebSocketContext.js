@@ -17,6 +17,7 @@ export const WebSocketProvider = ({ children }) => {
     global_framerate: 30,
     active_animations: [],
     gpio_pins: {},
+    analog_channels: {},
     camera_stats: {},
     motor_stats: {},
     behaviour_status: { nodes: [], currently_running: [], changed: false, tree_running: false },

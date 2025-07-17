@@ -6,7 +6,7 @@ Provides stepper motor control with continuous stepping using threading.
 import threading
 import time
 from .base_driver import MotorDriver
-from Servo.DRV8825 import DRV8825
+from Stepper.DRV8825 import DRV8825
 
 
 class DRV8825Driver(MotorDriver):
