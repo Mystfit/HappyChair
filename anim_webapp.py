@@ -11,7 +11,7 @@ from pathlib import Path
 from io_controller import IOController
 from camera_controller import CameraController
 from yaw_controller import YawController
-from BehaviourTrees.chair_behaviour_tree import ChairBehaviourTree
+from BehaviourTrees.implementations.chair_behaviour_tree import ChairBehaviourTree
 import cv2
 import numpy as np
 
