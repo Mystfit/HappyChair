@@ -58,7 +58,7 @@ def load_animation(anim_path):
     available_animations[anim_path.stem] = animation
     print(f"Loaded animation: {anim_path.stem}")
     
-def create_animation_layer(animation_name, weight=0.0, loop=False):
+def create_animation_layer(animation_name, weight=0.0, loop=False, transient=True):
     """Create an animation layer for the specified animation and add it to the player"""
     global available_animations, animation_controller
     if animation_name not in available_animations:
@@ -67,7 +67,7 @@ def create_animation_layer(animation_name, weight=0.0, loop=False):
     
     animation = available_animations[animation_name]
     # Use the player's create_layer method to create and add the layer
-    return animation_controller.create_layer(animation, animation_name, weight, loop)
+    return animation_controller.create_layer(animation, animation_name, weight, loop, transient, autoplay=False)
     
 def activate_playlist(playlist_path):
     global playlists
@@ -207,7 +207,7 @@ def api_play_animation():
         if not layer:
             print(f"Creating new layer for animation: {animation_name}")
             # Non-looping by default in dynamic mode
-            layer = create_animation_layer(animation_name, float(animation_weight), False)
+            layer = create_animation_layer(animation_name, float(animation_weight), False, transient=True)
             if not layer:
                 return jsonify({'success': False, 'error': 'Failed to create animation layer'}), 500
         else:
@@ -924,8 +924,7 @@ def handle_blender_live(ws):
 
 
 # Create a single base layer that we can return to when animations finish playing
-base_layer = create_animation_layer("idle", 1.0, True)
-base_layer.play()
+base_layer = create_animation_layer("idle", 1.0, True, transient=False)
 animation_controller.start()
 
 # Initialize ChairBehaviourTree after all controllers are set up

@@ -159,7 +159,7 @@ class ServoAnimationController(object):
         with self.anim_lock:
             self.stack.remove(layer)
 
-    def create_layer(self, animation, name, weight=0.0, loop=False, transient=None):
+    def create_layer(self, animation, name, weight=0.0, loop=False, transient=None, autoplay=True):
         """Create an animation layer and add it to the player"""
         # If transient is None, default to the appropriate value based on mode and loop status
         
@@ -176,7 +176,7 @@ class ServoAnimationController(object):
         self.add_layer(layer)
         
         # Make sure the layer is playing state is set
-        layer._is_playing = True
+        layer._is_playing = autoplay
         
         # Debug output
         print(f"Created animation layer: {name}, weight={weight}, loop={loop}, transient={transient}")
@@ -306,7 +306,6 @@ class ServoAnimationController(object):
                     with self.anim_lock:
                         weighted_layer_sum = np.zeros(len(self.servos))
                         for anim in self.stack:
-                            #print(f"Animation {anim.current_animation.name.split('.json')[0]} servo update")
                             # Read and sum angles together
                             anim_angles = np.zeros(len(self.servos))
                             servo_idx = 0
@@ -314,8 +313,6 @@ class ServoAnimationController(object):
                                 anim_angles[servo_idx] = anim.servo_angle(servo_id)
                                 weighted_layer_sum[servo_idx] += anim.servo_angle(servo_id) * anim.weight
                                 servo_idx += 1
-                                #print(f"Servo ID: {servo_id}, Value: {anim.servo_angle(servo_id)}")
-                            #weighted_layer_sum += anim_angles * anim.weight
                     
                     # Rotate servos
                     for servo_id, angle in zip(self.servos, weighted_layer_sum):
@@ -459,10 +456,12 @@ class ServoAnimationLayer(object):
         return self._blending_out
     
     def update(self, delta: timedelta = None, framerate=60):
-        if not self._is_playing:
-            return
+        next_frame = self.current_frame
         
-        next_frame = self.current_frame + math.floor(delta.total_seconds() * framerate)
+        # So that we keep the current layer pose, we only increment the frame if we're playing
+        if self._is_playing:
+            next_frame += math.floor(delta.total_seconds() * framerate)
+        
         if self.current_animation:
             if next_frame < self.current_animation.frames():
                 # Increment frame counter
