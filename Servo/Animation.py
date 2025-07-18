@@ -76,6 +76,7 @@ class ServoAnimationController(object):
         self._interpolation_start_time = 0.0
         self._interpolation_end_time = 0.0
         self._interpolation_duration = 1.0 
+        self.on_interpolation_finished_cb = []
         
         # Live servo values from external sources
         self._live_ws = False
@@ -113,7 +114,7 @@ class ServoAnimationController(object):
 
         if playlist_layer: 
             print(f"Hooking onComplete function to {playlist_anim_name}")
-            playlist_layer.on_complete = lambda: self.increment_playlist_animation()
+            playlist_layer.on_complete.append(lambda: self.increment_playlist_animation())
             playlist_layer.set_post_delay_frames(self._active_playlist.get_animation_post_delay(self._playlist_active_idx))
             self.animate_layer_weight(playlist_layer, 1.0, 1.0)
             playlist_layer.play()
@@ -127,7 +128,7 @@ class ServoAnimationController(object):
         playlist_anim_name = self._active_playlist.get_animation_name(self._playlist_active_idx) if self._active_playlist else ""
         if playlist_anim_name:
             playlist_layer = self.get_layer_by_name(playlist_anim_name)
-        playlist_layer.on_complete = None
+        playlist_layer.on_complete.clear()
 
         # Set up next animation. By default, the playlist will loop
         next_playlist_anim_idx = (self._playlist_active_idx + 1) % len(self._active_playlist)
@@ -139,7 +140,7 @@ class ServoAnimationController(object):
         
         if next_playlist_layer:
             # Hook playlist increment when current animation finishes playing
-            next_playlist_layer.on_complete = lambda: self.increment_playlist_animation()
+            next_playlist_layer.on_complete.append(lambda: self.increment_playlist_animation())
             next_playlist_layer.set_post_delay_frames(self._active_playlist.get_animation_post_delay(next_playlist_anim_idx))
 
             # Interpolate next animation to avoid rapid servo movements
@@ -170,7 +171,7 @@ class ServoAnimationController(object):
         
         # Set callbacks to trigger when layer is ready to blend out
         layer.blend_out_frame_duration = self._interpolation_duration * self.framerate
-        layer.on_start_blend_out = lambda: self.animate_layer_weight(layer, 0.0, self._interpolation_duration)
+        layer.on_start_blend_out.append(lambda: self.animate_layer_weight(layer, 0.0, self._interpolation_duration))
         layer._animation_name = name  # Store the name on the layer itself
         
         self.add_layer(layer)
@@ -221,6 +222,7 @@ class ServoAnimationController(object):
         self._interpolation_end_weight = weight
         self._interpolation_layer = layer
         layer.blend_out_frame_duration = duration * self.framerate
+        layer.is_interpolating = True
         
     def set_layer_weight(self, layer, weight):
         weight = max(min(weight, 1.0), 0.0)
@@ -284,8 +286,14 @@ class ServoAnimationController(object):
                         if current_time >= self._interpolation_end_time:
                             # Stop interpolating 
                             self.set_layer_weight(self._interpolation_layer, self._interpolation_end_weight)
+                            self._interpolation_layer.is_interpolating = False
+                            for callback in self._interpolation_layer.on_interpolation_finished:
+                                callback(self._interpolation_layer)
+
                             self._interpolation_layer = None
                             self._interpolating = False
+                            for callback in self.on_interpolation_finished_cb:
+                                callback()
                         else:
                             duration = self._interpolation_end_time - self._interpolation_start_time
                             
@@ -387,11 +395,13 @@ class ServoAnimationLayer(object):
         self._is_playing = True
         self._post_delay_frames = 0
         self._current_post_delay_frame_count = 0
-        self.on_complete = on_completed_fn
+        self.on_complete = [on_completed_fn] if callable(on_completed_fn) else []
         self.blend_out_frame_duration = blend_out_frames
-        self.on_start_blend_out = on_start_blend_out_fn
+        self.on_start_blend_out = [on_start_blend_out_fn] if callable(on_start_blend_out_fn) else []
         self._blending_out = False
         self.transient = transient  # Whether this layer should be removed automatically when completed
+        self.is_interpolating = False  # Whether this layer is currently being interpolated
+        self.on_interpolation_finished = []
         self._animation_name = None  # Will be set when added to the player
         
     def start(self):
@@ -471,7 +481,8 @@ class ServoAnimationLayer(object):
                 #print(f"Current frame {self.current_frame} Total frames {self.current_animation.frames()} Blend out {self.blend_out_duration}")
                 if self.current_frame >= self.current_animation.frames() - self.blend_out_frame_duration and not self.looping and not self._blending_out:
                     self._blending_out = True
-                    self.on_start_blend_out()
+                    for callback in self.on_start_blend_out:
+                        callback()
                         
             else:
                 if next_frame >= self.current_animation.frames():
@@ -485,8 +496,8 @@ class ServoAnimationLayer(object):
                     
                     # Trigger callbacks
                     print(f'End of animation {self.current_animation.name.split(".json")[0]}')
-                    if self.on_complete:
-                        self.on_complete()
+                    for callback in self.on_complete:
+                        callback()
 
                     # Handle looping
                     if self.looping:

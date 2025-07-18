@@ -7,7 +7,7 @@ from py_trees import common, composites, behaviours, decorators
 import operator
 from typing import Dict, Any
 
-from ..base import AnimatronicBehaviourTree, AnimationAction, SensorCheck, TrackingAction
+from ..base import AnimatronicBehaviourTree, AnimationAction, SensorCheck, TrackingAction, BlendOutAnimationAction
 
 
 class ChairBehaviourTree(AnimatronicBehaviourTree):
@@ -81,6 +81,7 @@ class ChairBehaviourTree(AnimatronicBehaviourTree):
     def _create_sitting_tree(self):
         """Create the behaviour tree for when a person is sitting on the chair."""
         
+        # Make sure that we don't enter into the sitting tree unless the seat is occupied
         guard_sitting_in_seat = behaviours.CheckBlackboardVariableValue(
             name="Check: Is seat occupied?",
             check=common.ComparisonExpression(
@@ -88,6 +89,7 @@ class ChairBehaviourTree(AnimatronicBehaviourTree):
             )
         )
         
+        # Make sure we only enter the sitting anim tree once
         guard_not_previously_in_seat = behaviours.CheckBlackboardVariableValue(
             name="Check: Was seat previously occupied?",
             check=common.ComparisonExpression(
@@ -95,6 +97,7 @@ class ChairBehaviourTree(AnimatronicBehaviourTree):
             )
         )
         
+        # Write BB sitting value to guard against re-entering
         person_in_seat_last_BB = behaviours.SetBlackboardVariable(
             name="BB: Set person in seat",
             variable_name="seat_occupied_last",
@@ -113,20 +116,29 @@ class ChairBehaviourTree(AnimatronicBehaviourTree):
         # Create the sitting root sequence
         sitting_animgraph = composites.Sequence(name="Sitting animations", memory=True)
         
-        # Create actions for playing chair-specific animations
+        # Idle->hugging transition
         hug_intro_anim = AnimationAction(
             name="Anim: Hug Intro",
             animation_controller=self.animation_controller,
             animation_name=self.ANIMATIONS['hug_intro']
         )
-        idle_animation = AnimationAction(
-            name="Anim: Hug idle",
+        
+        # Single paused frame to maintain our hugging position
+        hugging_idle_animation = AnimationAction(
+            name="AsyncAnim: Hug idle",
             animation_controller=self.animation_controller,
             animation_name=self.ANIMATIONS['hug_idle'],
             looping=True,
             autoplay=False
         )
         
+        # Since our hugging idle animation is paused, it will never succeed on it's own so we need to skip over it
+        continue_whilst_idle = decorators.RunningIsSuccess(
+            name=": Continue while idle",
+            child=hugging_idle_animation
+        )
+        
+        # Guard the exit animation to only play when the seat is no longer occupied
         guard_person_left_seat = decorators.FailureIsRunning(
             name="Decorator: Hug Outro",
             child=behaviours.CheckBlackboardVariableValue(
@@ -136,13 +148,32 @@ class ChairBehaviourTree(AnimatronicBehaviourTree):
                 )
             )
         )
+            
+        async_stop_hug = decorators.RunningIsSuccess(
+            name="Skip: Don't wait for hug idle anim to blend out",
+            child=BlendOutAnimationAction(
+                name="Stop: Hug Idle",
+                animation_controller=self.animation_controller,
+                animation_name=hugging_idle_animation.animation_name,
+            )
+        )
         
-        # Outro animation to handle when person gets up
+        # Guard against playing outro animations unless we leave the seat
+        # guard_leave_sitting_animations = behaviours.CheckBlackboardVariableValue(
+        #     name="Check: Is seat empty?",
+        #     check=common.ComparisonExpression(
+        #         variable="seat_occupied", value=False, operator=operator.eq
+        #     )
+        # )
+        
+        # Hud idle-> Hug Outro animation
         hug_outro_anim = AnimationAction(
             name="Anim: hug outro",
             animation_controller=self.animation_controller,
             animation_name=self.ANIMATIONS['hug_outro']
         )
+        
+        # Reset seat_occupied_last to let us re-enter the sitting anim tree later 
         person_finished_leaving_bb = behaviours.SetBlackboardVariable(
             name="BB: Set person finished leaving",
             variable_name="seat_occupied_last",
@@ -156,16 +187,9 @@ class ChairBehaviourTree(AnimatronicBehaviourTree):
             overwrite=True
         )
         
-        guard_leave_sitting_animations = behaviours.CheckBlackboardVariableValue(
-            name="Check: Is seat occupied?",
-            check=common.ComparisonExpression(
-                variable="seat_occupied", value=False, operator=operator.eq
-            )
-        )
-        
         hug_outro_sequence = composites.Sequence(name="AnimSeq: Transition out of hug", memory=True)
         hug_outro_sequence.add_children([
-            guard_leave_sitting_animations,
+            async_stop_hug,
             hug_outro_anim,
             person_finished_leaving_bb,
             enable_scanning_bb
@@ -178,7 +202,7 @@ class ChairBehaviourTree(AnimatronicBehaviourTree):
             person_in_seat_last_BB,
             disable_scanning_bb,
             hug_intro_anim,
-            idle_animation,
+            continue_whilst_idle,
             guard_person_left_seat,
             hug_outro_sequence
         ])  
