@@ -68,14 +68,8 @@ class ServoAnimationController(object):
         self._next_frame_time = datetime.now()
         self._last_frame_time = datetime.now()
         
-        # Interpolation
-        self._interpolating = False
-        self._interpolation_layer = None
-        self._interpolation_start_weight = 0.0
-        self._interpolation_end_weight = 1.0
-        self._interpolation_start_time = 0.0
-        self._interpolation_end_time = 0.0
-        self._interpolation_duration = 1.0 
+        # Multi-layer interpolation tracking
+        self._interpolating_layers = []
         self.on_interpolation_finished_cb = []
         
         # Live servo values from external sources
@@ -170,8 +164,9 @@ class ServoAnimationController(object):
         layer = ServoAnimationLayer(animation, loop, weight, transient=transient)
         
         # Set callbacks to trigger when layer is ready to blend out
-        layer.blend_out_frame_duration = self._interpolation_duration * self.framerate
-        layer.on_start_blend_out.append(lambda: self.animate_layer_weight(layer, 0.0, self._interpolation_duration))
+        default_duration = 1.0  # Default interpolation duration
+        layer.blend_out_frame_duration = default_duration * self.framerate
+        layer.on_start_blend_out.append(lambda: self.animate_layer_weight(layer, 0.0, default_duration))
         layer._animation_name = name  # Store the name on the layer itself
         
         self.add_layer(layer)
@@ -215,54 +210,92 @@ class ServoAnimationController(object):
         if not layer:
             return
         
-        self._interpolating = True
-        self._interpolation_start_time = datetime.now()
-        self._interpolation_end_time = self._interpolation_start_time + timedelta(seconds=duration)
-        self._interpolation_start_weight = layer.weight
-        self._interpolation_end_weight = weight
-        self._interpolation_layer = layer
+        # Set up per-layer interpolation state
+        layer._interpolation_start_time = datetime.now()
+        layer._interpolation_end_time = layer._interpolation_start_time + timedelta(seconds=duration)
+        layer._interpolation_start_weight = layer.weight
+        layer._interpolation_end_weight = weight
+        layer._interpolation_duration = duration
         layer.blend_out_frame_duration = duration * self.framerate
         layer.is_interpolating = True
         
-    def set_layer_weight(self, layer, weight):
-        weight = max(min(weight, 1.0), 0.0)
-        weights = np.array([anim.weight for anim in self.stack])
+        # Add to interpolating layers list
+        if layer not in self._interpolating_layers:
+            self._interpolating_layers.append(layer)
         
-        try:
-            anim_idx = self.stack.index(layer)
-        except ValueError:
+    def update_weights(self):
+        """Update all layer weights using two-phase normalization"""
+        if not self.stack:
             return
-        
-        # Set target weight
-        weights[anim_idx] = weight
-        
-        # Calculate remaining weight to distribute
-        remaining_weight = 1.0 - weight
-        other_indices = [i for i in range(len(weights)) if i != anim_idx]
-        
-        if remaining_weight > 0 and len(other_indices) > 0:
-            # Get current sum of other weights
-            other_sum = np.sum(weights[other_indices])
             
-            if other_sum > 0:
-                # Scale other weights proportionally
-                scale = remaining_weight / other_sum
-                for i in other_indices:
-                    weights[i] *= scale
-            else:
-                # Distribute equally if all other weights are 0
-                equal_weight = remaining_weight / len(other_indices)
-                for i in other_indices:
-                    weights[i] = equal_weight
-        else:
-            # Set all other weights to 0
-            for i in other_indices:
-                weights[i] = 0.0
+        # Phase 1: Calculate interpolating layer weights
+        interpolating_weight_sum = 0.0
+        non_interpolating_layers = []
         
-        # Apply weights
-        with self.anim_lock:
-            for anim, norm_weight in zip(self.stack, weights):
-                anim.weight = max(min(norm_weight, 1.0), 0.0)
+        for layer in self.stack:
+            if layer.is_interpolating:
+                current_time = datetime.now()
+                if current_time >= layer._interpolation_end_time:
+                    # Interpolation finished - set final weight
+                    layer.weight = layer._interpolation_end_weight
+                    layer.is_interpolating = False
+                    
+                    # Remove from interpolating layers list
+                    if layer in self._interpolating_layers:
+                        self._interpolating_layers.remove(layer)
+                    
+                    # Trigger callbacks
+                    for callback in layer.on_interpolation_finished:
+                        callback(layer)
+                    for callback in self.on_interpolation_finished_cb:
+                        callback()
+                else:
+                    # Calculate interpolated weight
+                    duration = layer._interpolation_end_time - layer._interpolation_start_time
+                    lerp_amt = float((current_time - layer._interpolation_start_time) / duration)
+                    interpolated_weight = map_range(lerp_amt, 0.0, 1.0, layer._interpolation_start_weight, layer._interpolation_end_weight)
+                    layer.weight = max(min(interpolated_weight, 1.0), 0.0)
+                
+                interpolating_weight_sum += layer.weight
+            else:
+                non_interpolating_layers.append(layer)
+        
+        # Phase 2: Distribute remaining weight among non-interpolating layers
+        remaining_weight = max(0.0, 1.0 - interpolating_weight_sum)
+        
+        if non_interpolating_layers:
+            # Get current sum of non-interpolating weights
+            current_sum = sum(layer.weight for layer in non_interpolating_layers)
+            
+            if current_sum > 0:
+                # Scale proportionally
+                scale = remaining_weight / current_sum
+                for layer in non_interpolating_layers:
+                    layer.weight *= scale
+            else:
+                # Distribute equally
+                equal_weight = remaining_weight / len(non_interpolating_layers)
+                for layer in non_interpolating_layers:
+                    layer.weight = equal_weight
+        
+        # Ensure all weights are within bounds
+        for layer in self.stack:
+            layer.weight = max(min(layer.weight, 1.0), 0.0)
+    
+    def set_layer_weight(self, layer, weight):
+        """Set a specific layer's weight (for non-interpolating usage)"""
+        if layer.is_interpolating:
+            return  # Don't manually set weights of interpolating layers
+            
+        weight = max(min(weight, 1.0), 0.0)
+        layer.weight = weight
+        
+        # Trigger weight update to renormalize
+        self.update_weights()
+    
+    def is_interpolating(self):
+        """Check if any layers are currently interpolating"""
+        return len(self._interpolating_layers) > 0
          
     def update(self):
         while True:
@@ -280,26 +313,8 @@ class ServoAnimationController(object):
                     frame_delta = current_frame_time - self._last_frame_time
                     self._last_frame_time = current_frame_time
 
-                    # Interpolate weights
-                    if self._interpolating:
-                        current_time = datetime.now()
-                        if current_time >= self._interpolation_end_time:
-                            # Stop interpolating 
-                            self.set_layer_weight(self._interpolation_layer, self._interpolation_end_weight)
-                            self._interpolation_layer.is_interpolating = False
-                            for callback in self._interpolation_layer.on_interpolation_finished:
-                                callback(self._interpolation_layer)
-
-                            self._interpolation_layer = None
-                            self._interpolating = False
-                            for callback in self.on_interpolation_finished_cb:
-                                callback()
-                        else:
-                            duration = self._interpolation_end_time - self._interpolation_start_time
-                            
-                            lerp_amt = float((current_time - self._interpolation_start_time) / duration)
-                            interpolated_weight = map_range(lerp_amt, 0.0, 1.0, self._interpolation_start_weight, self._interpolation_end_weight)
-                            self.set_layer_weight(self._interpolation_layer, interpolated_weight)
+                    # Update weights (handles all interpolations)
+                    self.update_weights()
                     
                     # Update all animation counters and check for completed transient layers
                     for anim in list(self.stack):  # Use a copy of the list to safely modify during iteration
@@ -403,6 +418,13 @@ class ServoAnimationLayer(object):
         self.is_interpolating = False  # Whether this layer is currently being interpolated
         self.on_interpolation_finished = []
         self._animation_name = None  # Will be set when added to the player
+        
+        # Per-layer interpolation state
+        self._interpolation_start_time = None
+        self._interpolation_end_time = None
+        self._interpolation_start_weight = 0.0
+        self._interpolation_end_weight = 0.0
+        self._interpolation_duration = 0.0
         
     def start(self):
        pass
