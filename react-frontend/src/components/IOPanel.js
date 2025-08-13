@@ -139,6 +139,48 @@ const IOPanel = ({ onStatusUpdate }) => {
     }
   };
 
+  const handleClutchLockToggle = async () => {
+    try {
+      const locked = !motorStats.driver_clutch_locked;
+      const response = await fetch('/api/motor/clutch/lock', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ locked })
+      });
+
+      const result = await response.json();
+      if (!result.success) {
+        setError(result.error);
+      } else {
+        setError(null);
+      }
+    } catch (err) {
+      setError(`Failed to toggle clutch lock: ${err.message}`);
+    }
+  };
+
+  const handleEmergencyDisengage = async () => {
+    try {
+      const response = await fetch('/api/motor/clutch/emergency-disengage', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+
+      const result = await response.json();
+      if (!result.success) {
+        setError(result.error);
+      } else {
+        setError(null);
+      }
+    } catch (err) {
+      setError(`Failed to emergency disengage clutch: ${err.message}`);
+    }
+  };
+
   return (
     <div className="io-panel">
       <div className="panel-header">
@@ -342,6 +384,50 @@ const IOPanel = ({ onStatusUpdate }) => {
                 </span>
               </div>
             </div>
+            
+            {/* Clutch Control Section */}
+            <div className="clutch-control">
+              <h5>Clutch Control</h5>
+              <div className="clutch-info">
+                <div className="clutch-status">
+                  <span className="clutch-label">Status:</span>
+                  <span className={`clutch-value status-${motorStats.driver_clutch_engaged ? 'engaged' : 'disengaged'}`}>
+                    {motorStats.driver_clutch_engaged ? '● Engaged' : '○ Disengaged'}
+                  </span>
+                </div>
+                <div className="clutch-lock">
+                  <span className="clutch-label">Lock:</span>
+                  <span className={`clutch-value lock-${motorStats.driver_clutch_locked ? 'locked' : 'unlocked'}`}>
+                    {motorStats.driver_clutch_locked ? '🔒 Locked' : '🔓 Unlocked'}
+                  </span>
+                </div>
+                <div className="limit-switches">
+                  <span className="clutch-label">Limits:</span>
+                  <div className="limit-indicators">
+                    <span className={`limit-indicator ${motorStats.driver_forward_limit_active ? 'active' : 'inactive'}`}>
+                      ← Forward
+                    </span>
+                    <span className={`limit-indicator ${motorStats.driver_reverse_limit_active ? 'active' : 'inactive'}`}>
+                      Reverse →
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <div className="clutch-controls">
+                <button 
+                  className={`btn btn-sm ${motorStats.driver_clutch_locked ? 'btn-success' : 'btn-warning'}`}
+                  onClick={handleClutchLockToggle}
+                >
+                  {motorStats.driver_clutch_locked ? 'Unlock Clutch' : 'Lock Clutch'}
+                </button>
+                <button 
+                  className="btn btn-sm btn-danger"
+                  onClick={handleEmergencyDisengage}
+                >
+                  Emergency Stop
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -445,6 +531,16 @@ const IOPanel = ({ onStatusUpdate }) => {
         
         .btn-secondary {
           background-color: #6c757d;
+          color: white;
+        }
+        
+        .btn-warning {
+          background-color: #ffc107;
+          color: #212529;
+        }
+        
+        .btn-danger {
+          background-color: #dc3545;
           color: white;
         }
         
@@ -698,6 +794,90 @@ const IOPanel = ({ onStatusUpdate }) => {
           background-color: #28a745;
           transition: width 0.3s ease;
           border-radius: 4px;
+        }
+        
+        .clutch-control {
+          margin-top: 15px;
+          padding-top: 15px;
+          border-top: 1px solid #e9ecef;
+        }
+        
+        .clutch-control h5 {
+          margin: 0 0 10px 0;
+          color: #495057;
+          font-size: 14px;
+        }
+        
+        .clutch-info {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+          margin-bottom: 10px;
+        }
+        
+        .clutch-status, .clutch-lock, .limit-switches {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 6px 10px;
+          background-color: white;
+          border-radius: 4px;
+          border: 1px solid #e9ecef;
+          font-size: 12px;
+        }
+        
+        .clutch-label {
+          font-weight: 500;
+          color: #6c757d;
+        }
+        
+        .clutch-value {
+          font-weight: bold;
+          font-size: 11px;
+        }
+        
+        .status-engaged {
+          color: #28a745;
+        }
+        
+        .status-disengaged {
+          color: #6c757d;
+        }
+        
+        .lock-locked {
+          color: #dc3545;
+        }
+        
+        .lock-unlocked {
+          color: #28a745;
+        }
+        
+        .limit-indicators {
+          display: flex;
+          gap: 8px;
+        }
+        
+        .limit-indicator {
+          font-size: 10px;
+          padding: 2px 6px;
+          border-radius: 3px;
+          font-weight: 500;
+        }
+        
+        .limit-indicator.active {
+          background-color: #dc3545;
+          color: white;
+        }
+        
+        .limit-indicator.inactive {
+          background-color: #e9ecef;
+          color: #6c757d;
+        }
+        
+        .clutch-controls {
+          display: flex;
+          gap: 8px;
+          justify-content: flex-end;
         }
         
         @media (min-width: 1200px) {

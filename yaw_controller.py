@@ -5,6 +5,7 @@ Provides a simple API for controlling stepper motor speed and direction.
 
 import threading
 import time
+from io_controller import IOController
 from typing import Optional, Dict, Any
 from motor_drivers import MotorDriver, MotorKitDriver, MotorKitStepperProxy, DRV8825Driver, DRV8825DriverPWM, DRV8825DriverPWMProxy
 
@@ -14,7 +15,10 @@ class YawController:
     Simple stepper motor controller providing speed and direction control.
     """
     
-    def __init__(self, motor_type="drv8825_pwm", gpio_handle=None):
+    def __init__(self, io_controller:IOController, motor_type="motorkit_stepper", gpio_handle=None):
+
+        self.io_controller = io_controller
+
         # Motor control
         self.motor_type = motor_type
         self.motor_driver = None
@@ -36,6 +40,21 @@ class YawController:
         
         # Threading
         self.control_lock = threading.Lock()
+
+        if not self.motor_driver:
+            # Create the appropriate motor driver based on motor_type
+            if self.motor_type == "motorkit":
+                self.motor_driver = MotorKitDriver()
+            elif self.motor_type == "motorkit_stepper":
+                self.motor_driver = MotorKitStepperProxy(1, self.io_controller, 14, 23, 24)
+            elif self.motor_type == "drv8825":
+                self.motor_driver = DRV8825Driver(gpio_handle=self.gpio_handle)
+            elif self.motor_type == "drv8825_pwm":
+                self.motor_driver = DRV8825DriverPWM(gpio_handle=self.gpio_handle)
+            elif self.motor_type == "drv8825_pwm_multiprocess":
+                self.motor_driver = DRV8825DriverPWMProxy(gpio_handle=self.gpio_handle)
+            else:
+                print(f"YawController: Unknown motor type: {self.motor_type}")
         
         print("YawController initialized")
     
@@ -43,24 +62,6 @@ class YawController:
     def start(self) -> bool:
         """Initialize and start motor control"""
         try:
-            if not self.motor_driver:
-                # Create the appropriate motor driver based on motor_type
-                if self.motor_type == "motorkit":
-                    self.motor_driver = MotorKitDriver()
-                elif self.motor_type == "motorkit_stepper":
-                    self.motor_driver = MotorKitStepperProxy()
-                elif self.motor_type == "drv8825":
-                    self.motor_driver = DRV8825Driver(gpio_handle=self.gpio_handle)
-                elif self.motor_type == "drv8825_pwm":
-                    self.motor_driver = DRV8825DriverPWM(gpio_handle=self.gpio_handle)
-                elif self.motor_type == "drv8825_pwm_multiprocess":
-                    self.motor_driver = DRV8825DriverPWMProxy(gpio_handle=self.gpio_handle)
-                else:
-                    print(f"YawController: Unknown motor type: {self.motor_type}")
-                    return False
-                
-                print(f"YawController: Created {self.motor_type} driver")
-            
             # Start the motor driver
             if self.motor_driver.start():
                 self.motor_enabled = True

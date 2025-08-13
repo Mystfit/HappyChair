@@ -97,7 +97,7 @@ analog_controller = AnalogController()
 camera_controller = CameraController()
 
 # Initialize YawController with DRV8825 PWM multiprocess driver to control chair base rotation
-yaw_controller = YawController(motor_type="drv8825_pwm_multiprocess")
+yaw_controller = YawController(motor_type="motorkit_stepper", io_controller=io_controller)
 
 # Initialize ChairBehaviourTree with all controllers
 chair_behaviour_tree = None
@@ -768,6 +768,101 @@ def api_yaw_status():
             'error': f'Failed to get yaw status: {str(e)}'
         }), 500
 
+# Motor Clutch Control API Endpoints
+@app.route('/api/motor/clutch/lock', methods=['POST'])
+def api_motor_clutch_lock():
+    global yaw_controller
+    try:
+        data = request.json
+        locked = data.get('locked', True)
+        
+        if yaw_controller and hasattr(yaw_controller, 'motor_driver'):
+            motor_driver = yaw_controller.motor_driver
+            if hasattr(motor_driver, 'set_clutch_lock'):
+                motor_driver.set_clutch_lock(locked)
+                return jsonify({
+                    'success': True,
+                    'message': f'Clutch {"locked" if locked else "unlocked"} successfully',
+                    'clutch_locked': locked
+                })
+            else:
+                return jsonify({
+                    'success': False,
+                    'error': 'Motor driver does not support clutch control'
+                }), 400
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'YawController or motor driver not initialized'
+            }), 400
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'Failed to control clutch lock: {str(e)}'
+        }), 500
+
+@app.route('/api/motor/clutch/emergency-disengage', methods=['POST'])
+def api_motor_clutch_emergency_disengage():
+    global yaw_controller
+    try:
+        if yaw_controller and hasattr(yaw_controller, 'motor_driver'):
+            motor_driver = yaw_controller.motor_driver
+            if hasattr(motor_driver, 'emergency_disengage'):
+                motor_driver.emergency_disengage()
+                return jsonify({
+                    'success': True,
+                    'message': 'Emergency clutch disengagement activated'
+                })
+            else:
+                return jsonify({
+                    'success': False,
+                    'error': 'Motor driver does not support clutch control'
+                }), 400
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'YawController or motor driver not initialized'
+            }), 400
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'Failed to emergency disengage clutch: {str(e)}'
+        }), 500
+
+@app.route('/api/motor/clutch/status', methods=['GET'])
+def api_motor_clutch_status():
+    global yaw_controller
+    try:
+        if yaw_controller and hasattr(yaw_controller, 'motor_driver'):
+            motor_driver = yaw_controller.motor_driver
+            if hasattr(motor_driver, 'get_clutch_status'):
+                clutch_status = motor_driver.get_clutch_status()
+                return jsonify({
+                    'success': True,
+                    'clutch_status': clutch_status
+                })
+            else:
+                return jsonify({
+                    'success': True,
+                    'clutch_status': {
+                        'clutch_enabled': False,
+                        'message': 'Motor driver does not support clutch control'
+                    }
+                })
+        else:
+            return jsonify({
+                'success': True,
+                'clutch_status': {
+                    'clutch_enabled': False,
+                    'message': 'YawController or motor driver not initialized'
+                }
+            })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'Failed to get clutch status: {str(e)}'
+        }), 500
+
 
 # Behaviour Tree API Endpoints
 @app.route('/api/behaviour/start', methods=['POST'])
@@ -941,9 +1036,12 @@ if __name__ == '__main__':
     # analog_controller.register_channel(0, "Pressure Sensor", gain=1, data_rate=128)
     # analog_controller.register_channel(1, "Temperature", gain=2, data_rate=250)
     analog_controller.register_channel(0, "ShoulderL_pressure", gain=1, data_rate=128, history_size=100, threshold=0.01)
-
-    io_controller.register_pin(14, "seatsensor", "input", "pull_up")
-    io_controller.register_pin(15, "spinclutch", "output")
+    analog_controller.register_channel(1, "ElbowL_pressure", gain=1, data_rate=128, history_size=100, threshold=0.01)
+    analog_controller.register_channel(2, "ShoulderR_pressure", gain=1, data_rate=128, history_size=100, threshold=0.01)
+    analog_controller.register_channel(3, "ElbowL_pressure", gain=1, data_rate=128, history_size=100, threshold=0.01)
+     
+    # Register seat presence sensor
+    io_controller.register_pin(15, "seatsensor", "input", "pull_up")
 
     #player = AnimationController().start()
     animation_controller.add_servo(15, "shoulder.R", None,  (500, 2500))

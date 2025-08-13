@@ -18,10 +18,24 @@ class MotorKitStepperProxy(MotorDriver):
     Maintains the same interface as base MotorDriver while isolating I2C operations.
     """
     
-    def __init__(self, stepper_num=1, stepping_style=stepper.SINGLE):
+    def __init__(self, stepper_num=1, io_controller=None, 
+                 clutch_output_pin=None, forward_limit_pin=None, reverse_limit_pin=None):
         super().__init__()
         self.stepper_num = stepper_num
-        self.stepping_style = stepping_style
+        self.stepping_style = stepper.SINGLE
+        
+        # Clutch control parameters
+        self.io_controller = io_controller
+        self.clutch_output_pin = clutch_output_pin
+        self.forward_limit_pin = forward_limit_pin
+        self.reverse_limit_pin = reverse_limit_pin
+        
+        # Clutch state management
+        self.clutch_engaged = False
+        self.clutch_locked = False  # Manual lock to prevent engagement
+        self.forward_limit_active = False  # True when forward limit is reached
+        self.reverse_limit_active = False  # True when reverse limit is reached
+        self.clutch_lock = threading.Lock()
         
         # Subprocess management
         self.subprocess = None
@@ -41,10 +55,14 @@ class MotorKitStepperProxy(MotorDriver):
         # State tracking
         self.state_lock = threading.Lock()
         
+        # Initialize clutch system if parameters provided
+        if self.io_controller and self.clutch_output_pin is not None:
+            self._setup_clutch_system()
+        
         # Register cleanup on exit
         atexit.register(self._cleanup_on_exit)
         
-        print("MotorKitStepperProxy: Initialized")
+        print("MotorKitStepperProxy: Initialized with clutch control")
     
     def start(self) -> bool:
         """
@@ -97,6 +115,9 @@ class MotorKitStepperProxy(MotorDriver):
         # Stop any active transitions
         self.stop_transitions()
         
+        # Disengage clutch before stopping
+        self._disengage_clutch()
+        
         # Send stop command to subprocess
         self._send_command('stop')
         
@@ -128,6 +149,23 @@ class MotorKitStepperProxy(MotorDriver):
         
         # Clamp speed to valid range
         speed = max(0.0, min(1.0, speed))
+        
+        # Check if direction is blocked by limit switches
+        if direction != "stopped" and self._is_direction_blocked(direction):
+            print(f"MotorKitStepperProxy: Movement in {direction} direction blocked by limit switch")
+            direction = "stopped"
+            speed = 0.0
+        
+        # Handle clutch engagement/disengagement
+        if direction == "stopped" or speed <= 0:
+            # Motor stopping - disengage clutch
+            self._disengage_clutch()
+        else:
+            # Motor starting - engage clutch
+            if not self._engage_clutch():
+                print("MotorKitStepperProxy: Failed to engage clutch, stopping motor")
+                direction = "stopped"
+                speed = 0.0
         
         # Send command to subprocess
         self._send_command('set_speed', {
@@ -249,8 +287,215 @@ class MotorKitStepperProxy(MotorDriver):
                 'subprocess_alive': self.subprocess.is_alive() if self.subprocess else False,
                 'subprocess_pid': self.subprocess.pid if self.subprocess and self.subprocess.is_alive() else None
             })
+            
+            # Add clutch status if clutch system is enabled
+            if self.io_controller and self.clutch_output_pin is not None:
+                clutch_status = self.get_clutch_status()
+                stats.update({
+                    'clutch_enabled': True,
+                    'clutch_engaged': clutch_status['clutch_engaged'],
+                    'clutch_locked': clutch_status['clutch_locked'],
+                    'forward_limit_active': clutch_status['forward_limit_active'],
+                    'reverse_limit_active': clutch_status['reverse_limit_active'],
+                    'clutch_output_pin': clutch_status['clutch_output_pin'],
+                    'forward_limit_pin': clutch_status['forward_limit_pin'],
+                    'reverse_limit_pin': clutch_status['reverse_limit_pin']
+                })
+            else:
+                stats.update({'clutch_enabled': False})
+            
             return stats
     
+    def _setup_clutch_system(self):
+        """Initialize the clutch control system"""
+        try:
+            # Register clutch output pin
+            if self.clutch_output_pin is not None:
+                success = self.io_controller.register_pin(
+                    self.clutch_output_pin, 
+                    f"clutch_stepper_{self.stepper_num}", 
+                    "output"
+                )
+                if not success:
+                    print(f"MotorKitStepperProxy: Failed to register clutch output pin {self.clutch_output_pin}")
+                    return False
+                
+                # Ensure clutch starts disengaged
+                self._disengage_clutch()
+            
+            # Register limit switch input pins
+            if self.forward_limit_pin is not None:
+                success = self.io_controller.register_pin(
+                    self.forward_limit_pin,
+                    f"forward_limit_stepper_{self.stepper_num}",
+                    "input",
+                    "pull_up"
+                )
+                if not success:
+                    print(f"MotorKitStepperProxy: Failed to register forward limit pin {self.forward_limit_pin}")
+                    return False
+            
+            if self.reverse_limit_pin is not None:
+                success = self.io_controller.register_pin(
+                    self.reverse_limit_pin,
+                    f"reverse_limit_stepper_{self.stepper_num}",
+                    "input", 
+                    "pull_up"
+                )
+                if not success:
+                    print(f"MotorKitStepperProxy: Failed to register reverse limit pin {self.reverse_limit_pin}")
+                    return False
+            
+            # Register event callback for limit switch monitoring
+            self.io_controller.register_event_callback(self._handle_gpio_event)
+            
+            print("MotorKitStepperProxy: Clutch system initialized successfully")
+            return True
+            
+        except Exception as e:
+            print(f"MotorKitStepperProxy: Error setting up clutch system: {e}")
+            return False
+    
+    def _handle_gpio_event(self, event):
+        """Handle GPIO events from IOController"""
+        try:
+            if event['type'] != 'pin_changed':
+                return
+            
+            pin_data = event['data']
+            pin_number = pin_data['pin']
+            new_state = pin_data['state']
+            previous_state = pin_data['previous_state']
+            
+            # Check if this is a limit switch pin and if it's a HIGH->LOW transition (reed switch activation)
+            if pin_number == self.forward_limit_pin and previous_state == 1 and new_state == 0:
+                self._handle_forward_limit_reached()
+            elif pin_number == self.reverse_limit_pin and previous_state == 1 and new_state == 0:
+                self._handle_reverse_limit_reached()
+            elif pin_number == self.forward_limit_pin and previous_state == 0 and new_state == 1:
+                self._handle_forward_limit_cleared()
+            elif pin_number == self.reverse_limit_pin and previous_state == 0 and new_state == 1:
+                self._handle_reverse_limit_cleared()
+                
+        except Exception as e:
+            print(f"MotorKitStepperProxy: Error handling GPIO event: {e}")
+    
+    def _handle_forward_limit_reached(self):
+        """Handle forward rotation limit reached"""
+        with self.clutch_lock:
+            print("MotorKitStepperProxy: Forward rotation limit reached")
+            self.forward_limit_active = True
+            
+            # Stop motor if currently moving forward
+            if self.current_direction == "forward":
+                print("MotorKitStepperProxy: Stopping motor due to forward limit")
+                self._set_speed_immediate("stopped", 0.0)
+                self._disengage_clutch()
+    
+    def _handle_reverse_limit_reached(self):
+        """Handle reverse rotation limit reached"""
+        with self.clutch_lock:
+            print("MotorKitStepperProxy: Reverse rotation limit reached")
+            self.reverse_limit_active = True
+            
+            # Stop motor if currently moving reverse
+            if self.current_direction == "reverse":
+                print("MotorKitStepperProxy: Stopping motor due to reverse limit")
+                self._set_speed_immediate("stopped", 0.0)
+                self._disengage_clutch()
+    
+    def _handle_forward_limit_cleared(self):
+        """Handle forward rotation limit cleared"""
+        with self.clutch_lock:
+            print("MotorKitStepperProxy: Forward rotation limit cleared")
+            self.forward_limit_active = False
+    
+    def _handle_reverse_limit_cleared(self):
+        """Handle reverse rotation limit cleared"""
+        with self.clutch_lock:
+            print("MotorKitStepperProxy: Reverse rotation limit cleared")
+            self.reverse_limit_active = False
+    
+    def _engage_clutch(self):
+        """Engage the clutch by setting output pin HIGH"""
+        if self.io_controller and self.clutch_output_pin is not None and not self.clutch_locked:
+            try:
+                success = self.io_controller.write_pin(self.clutch_output_pin, 1)
+                if success:
+                    self.clutch_engaged = True
+                    print("MotorKitStepperProxy: Clutch engaged")
+                else:
+                    print("MotorKitStepperProxy: Failed to engage clutch")
+                return success
+            except Exception as e:
+                print(f"MotorKitStepperProxy: Error engaging clutch: {e}")
+                return False
+        elif self.clutch_locked:
+            print("MotorKitStepperProxy: Cannot engage clutch - manually locked")
+            return False
+        return True
+    
+    def _disengage_clutch(self):
+        """Disengage the clutch by setting output pin LOW"""
+        if self.io_controller and self.clutch_output_pin is not None:
+            try:
+                success = self.io_controller.write_pin(self.clutch_output_pin, 0)
+                if success:
+                    self.clutch_engaged = False
+                    print("MotorKitStepperProxy: Clutch disengaged")
+                else:
+                    print("MotorKitStepperProxy: Failed to disengage clutch")
+                return success
+            except Exception as e:
+                print(f"MotorKitStepperProxy: Error disengaging clutch: {e}")
+                return False
+        return True
+    
+    def _is_direction_blocked(self, direction: str) -> bool:
+        """Check if movement in the specified direction is blocked by limit switches"""
+        if direction == "forward" and self.forward_limit_active:
+            return True
+        elif direction == "reverse" and self.reverse_limit_active:
+            return True
+        return False
+    
+    def set_clutch_lock(self, locked: bool):
+        """Manually lock or unlock the clutch"""
+        with self.clutch_lock:
+            self.clutch_locked = locked
+            if locked:
+                # If locking, disengage clutch immediately
+                self._disengage_clutch()
+                print("MotorKitStepperProxy: Clutch manually locked")
+            else:
+                print("MotorKitStepperProxy: Clutch manual lock released")
+    
+    def emergency_disengage(self):
+        """Emergency clutch disengagement - stops motor and disengages clutch"""
+        print("MotorKitStepperProxy: Emergency clutch disengagement activated")
+        
+        # Stop motor immediately
+        self._set_speed_immediate("stopped", 0.0)
+        
+        # Disengage clutch
+        self._disengage_clutch()
+        
+        # Lock clutch to prevent re-engagement
+        self.set_clutch_lock(True)
+    
+    def get_clutch_status(self) -> dict:
+        """Get current clutch and limit switch status"""
+        with self.clutch_lock:
+            return {
+                'clutch_engaged': self.clutch_engaged,
+                'clutch_locked': self.clutch_locked,
+                'forward_limit_active': self.forward_limit_active,
+                'reverse_limit_active': self.reverse_limit_active,
+                'clutch_output_pin': self.clutch_output_pin,
+                'forward_limit_pin': self.forward_limit_pin,
+                'reverse_limit_pin': self.reverse_limit_pin
+            }
+
     def __del__(self):
         """
         Destructor to ensure cleanup.
